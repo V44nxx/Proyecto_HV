@@ -95,6 +95,15 @@ class UploadDocumentUseCase:
                 "El archivo no tiene una cabecera PDF válida (magic bytes no corresponden a %PDF)."
             )
 
+        # Security validation: check for malicious embedded scripts, launch actions, and bombs
+        from app.infrastructure.security.pdf_validator import validate_pdf_security
+
+        is_secure, threat_reason = validate_pdf_security(file_bytes)
+        if not is_secure:
+            raise InvalidFileFormatError(
+                threat_reason or "El archivo PDF no cumple con las políticas de seguridad."
+            )
+
         # 3. PDF readability, encryption, and page count check using PyMuPDF
         try:
             pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")

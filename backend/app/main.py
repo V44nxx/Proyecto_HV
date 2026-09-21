@@ -104,6 +104,10 @@ def _register_middleware(app: FastAPI) -> None:
     from app.presentation.middleware.request_id import RequestIDMiddleware
     app.add_middleware(RequestIDMiddleware)
 
+    # Rate limiting middleware
+    from app.presentation.middleware.rate_limit import RateLimitMiddleware
+    app.add_middleware(RateLimitMiddleware)
+
 
 def _register_routers(app: FastAPI) -> None:
     """Register all API routers under the versioned prefix."""
