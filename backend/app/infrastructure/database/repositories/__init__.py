@@ -2,6 +2,7 @@
 Database repositories package.
 """
 
+from app.infrastructure.database.repositories.dashboard_repository import DashboardRepository
 from app.infrastructure.database.repositories.document_repository import DocumentRepository
 from app.infrastructure.database.repositories.person_repository import PersonRepository
 from app.infrastructure.database.repositories.review_repository import ReviewRepository
@@ -14,4 +15,5 @@ __all__ = [
     "PersonRepository",
     "ReviewRepository",
     "SearchRepository",
+    "DashboardRepository",
 ]

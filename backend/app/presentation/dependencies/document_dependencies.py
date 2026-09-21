@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.interfaces.ocr_provider import OCRProvider
 from app.application.interfaces.storage_provider import StorageProvider
+from app.infrastructure.database.repositories.dashboard_repository import DashboardRepository
 from app.infrastructure.database.repositories.document_repository import DocumentRepository
 from app.infrastructure.database.repositories.person_repository import PersonRepository
 from app.infrastructure.database.repositories.review_repository import ReviewRepository
@@ -41,6 +42,11 @@ def get_search_repo(db: DbSession) -> SearchRepository:
     return SearchRepository(db)
 
 
+def get_dashboard_repo(db: DbSession) -> DashboardRepository:
+    """Provides a DashboardRepository bound to current DB session."""
+    return DashboardRepository(db)
+
+
 def get_user_repo(db: DbSession) -> UserRepository:
     """Provides a UserRepository bound to current DB session."""
     return UserRepository(db)
@@ -60,6 +66,7 @@ DocumentRepo = Annotated[DocumentRepository, Depends(get_document_repo)]
 PersonRepo = Annotated[PersonRepository, Depends(get_person_repo)]
 ReviewRepo = Annotated[ReviewRepository, Depends(get_review_repo)]
 SearchRepo = Annotated[SearchRepository, Depends(get_search_repo)]
+DashboardRepo = Annotated[DashboardRepository, Depends(get_dashboard_repo)]
 UserRepo = Annotated[UserRepository, Depends(get_user_repo)]
 Storage = Annotated[StorageProvider, Depends(get_storage)]
 OCR = Annotated[OCRProvider, Depends(get_ocr)]
