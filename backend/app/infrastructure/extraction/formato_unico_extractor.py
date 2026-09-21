@@ -198,7 +198,7 @@ class FormatoUnicoExtractor:
         id_type = "CC"
         id_number = None
         m = re.search(
-            r"(?:DOCUMENTO DE IDENTIFICACI[OÓ]N|IDENTIFICACI[OÓ]N)[:\s]*(C\.?C\.?|C\.?E\.?|PASAPORTE|PEP)?[:\s]*([0-9\.\,]+)",
+            r"(?:DOCUMENTO DE IDENTIFICACI[OÓ]N|IDENTIFICACI[OÓ]N)[:\s]*(C\.?C\.?|C\.?E\.?|PASAPORTE|PEP|T\.?I\.?)?[:\s]*(?:N[Oº°\.]+|N[UÚ]MERO)?[:\s]*([0-9\.\,]+)",
             text_p1,
             re.IGNORECASE,
         )
@@ -216,7 +216,7 @@ class FormatoUnicoExtractor:
             ))
         else:
             # Fallback for standalone number
-            m_num = re.search(r"(?:C\.?C\.?|CEDULA)[:\s]*([0-9\.\,]{6,12})", text_p1, re.IGNORECASE)
+            m_num = re.search(r"(?:C\.?C\.?|CEDULA)[:\s]*(?:N[Oº°\.]+|N[UÚ]MERO)?[:\s]*([0-9\.\,]{6,12})", text_p1, re.IGNORECASE)
             if m_num:
                 id_number = re.sub(r"[^\d]", "", m_num.group(1))
 

@@ -47,9 +47,14 @@ class LocalStorageProvider(StorageProvider):
 
         try:
             candidate_path.relative_to(self.base_path)
-        except ValueError as exc:
-            logger.error("storage_path_traversal_attempt", key=key, base=str(self.base_path))
-            raise StoragePathTraversalError(f"Ruta de almacenamiento inválida: {key}") from exc
+        except ValueError:
+            # On Windows, Path.resolve() can differ in drive letter or folder casing
+            # when directories are created concurrently. Compare case-folded paths as fallback.
+            try:
+                Path(str(candidate_path).lower()).relative_to(Path(str(self.base_path).lower()))
+            except ValueError as exc:
+                logger.error("storage_path_traversal_attempt", key=key, base=str(self.base_path))
+                raise StoragePathTraversalError(f"Ruta de almacenamiento inválida: {key}") from exc
 
         return candidate_path
 
