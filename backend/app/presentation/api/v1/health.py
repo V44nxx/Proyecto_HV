@@ -111,3 +111,25 @@ async def health_check_storage(
         "backend": settings.storage_backend,
         "message": "Health check for this backend is not yet implemented",
     }
+
+
+@router.get(
+    "/health/ocr",
+    summary="Verificar disponibilidad del proveedor OCR",
+    tags=["Sistema"],
+)
+async def health_check_ocr(
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """
+    Checks the status of the configured OCR provider.
+    """
+    from app.infrastructure.ocr.ocr_factory import get_ocr_provider
+
+    provider = get_ocr_provider(settings)
+    is_healthy = await provider.health_check()
+    return {
+        "status": "ok" if is_healthy else "degraded",
+        "provider": provider.provider_name,
+        "healthy": is_healthy,
+    }

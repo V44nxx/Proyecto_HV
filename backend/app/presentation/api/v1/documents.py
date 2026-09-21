@@ -37,6 +37,7 @@ from app.application.use_cases.documents.exceptions import (
 )
 from app.application.use_cases.documents.get_document import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents import ListDocumentsUseCase
+from app.application.use_cases.documents.process_document_text import ProcessDocumentTextUseCase
 from app.application.use_cases.documents.upload_document import UploadDocumentUseCase
 from app.presentation.dependencies.auth import (
     CurrentUser,
@@ -44,15 +45,18 @@ from app.presentation.dependencies.auth import (
 )
 from app.presentation.dependencies.document_dependencies import (
     DocumentRepo,
+    OCR,
     Storage,
     UserRepo,
 )
 from app.presentation.schemas.document_schemas import (
     DocumentDetailResponse,
+    DocumentExtractionResponse,
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
     ProcessingJobResponse,
+    ProcessTextResponse,
 )
 
 logger = structlog.get_logger(__name__)
@@ -304,3 +308,76 @@ async def get_document_job(
         )
 
     return ProcessingJobResponse.model_validate(latest_job)
+
+
+@router.post(
+    "/{document_id}/process-text",
+    response_model=ProcessTextResponse,
+    summary="Ejecutar extracción de texto y OCR",
+    dependencies=[require_permission("documents", "write")],
+)
+async def process_document_text(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    storage: Storage,
+    ocr: OCR,
+) -> ProcessTextResponse:
+    """
+    Inicia la extracción de texto nativo con PyMuPDF y ejecuta OCR en páginas escaneadas.
+    Persiste los registros de extracción y actualiza el estado del trabajo.
+    """
+    use_case = ProcessDocumentTextUseCase(
+        document_repo=document_repo,
+        storage_provider=storage,
+        ocr_provider=ocr,
+    )
+
+    try:
+        ocr_result = await use_case.execute(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=exc.message,
+        ) from exc
+    except Exception as exc:
+        logger.error("text_processing_failed", document_id=str(document_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante el procesamiento de texto: {exc}",
+        ) from exc
+
+    preview = ocr_result.full_text[:300] + "..." if len(ocr_result.full_text) > 300 else ocr_result.full_text
+
+    return ProcessTextResponse(
+        message="Extracción de texto completada exitosamente",
+        document_id=document_id,
+        provider=ocr_result.provider,
+        pages_count=ocr_result.page_count,
+        overall_confidence=ocr_result.overall_confidence,
+        processing_ms=ocr_result.processing_ms,
+        full_text_preview=preview,
+    )
+
+
+@router.get(
+    "/{document_id}/extractions",
+    response_model=list[DocumentExtractionResponse],
+    summary="Obtener extracciones de texto de un documento",
+    dependencies=[require_permission("documents", "read")],
+)
+async def get_document_extractions(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+) -> list[DocumentExtractionResponse]:
+    """
+    Retorna la lista de extracciones por página registradas para el documento.
+    """
+    doc = await document_repo.get_by_id(document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Documento con ID {document_id} no encontrado.",
+        )
+
+    extractions = await document_repo.get_extractions_for_document(document_id)
+    return [DocumentExtractionResponse.model_validate(e) for e in extractions]

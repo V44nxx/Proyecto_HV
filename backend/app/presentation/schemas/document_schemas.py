@@ -69,3 +69,31 @@ class DocumentListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class DocumentExtractionResponse(BaseModel):
+    """Extraction record for a document or page."""
+
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    document_id: uuid.UUID
+    page_id: uuid.UUID | None = None
+    ocr_provider: str | None = None
+    raw_text: str | None = None
+    confidence: float | None = None
+    processing_ms: int | None = None
+    model_version: str | None = None
+    extracted_at: datetime
+
+
+class ProcessTextResponse(BaseModel):
+    """Response returned after running native text extraction / OCR."""
+
+    message: str = "Extracción de texto completada exitosamente"
+    document_id: uuid.UUID
+    provider: str
+    pages_count: int
+    overall_confidence: float
+    processing_ms: int
+    full_text_preview: str

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database.models.document_models import (
     Document,
+    DocumentExtraction,
     DocumentPage,
     ProcessingJob,
 )
@@ -195,6 +196,37 @@ class DocumentRepository:
             select(DocumentPage)
             .where(DocumentPage.document_id == document_id)
             .order_by(DocumentPage.page_number.asc())
+        )
+        result = await self._db.execute(stmt)
+        return list(result.scalars().all())
+
+    # ---- Document Extractions ----
+
+    async def create_document_extraction(
+        self, extraction: DocumentExtraction
+    ) -> DocumentExtraction:
+        """Persist a single DocumentExtraction record."""
+        self._db.add(extraction)
+        await self._db.flush()
+        await self._db.refresh(extraction)
+        return extraction
+
+    async def create_document_extractions(
+        self, extractions: list[DocumentExtraction]
+    ) -> list[DocumentExtraction]:
+        """Bulk insert DocumentExtraction records."""
+        self._db.add_all(extractions)
+        await self._db.flush()
+        return extractions
+
+    async def get_extractions_for_document(
+        self, document_id: uuid.UUID
+    ) -> list[DocumentExtraction]:
+        """Fetch all extraction records for a document."""
+        stmt = (
+            select(DocumentExtraction)
+            .where(DocumentExtraction.document_id == document_id)
+            .order_by(DocumentExtraction.extracted_at.asc())
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())

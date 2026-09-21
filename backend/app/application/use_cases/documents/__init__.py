@@ -13,6 +13,7 @@ from app.application.use_cases.documents.exceptions import (
 )
 from app.application.use_cases.documents.get_document import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents import ListDocumentsUseCase
+from app.application.use_cases.documents.process_document_text import ProcessDocumentTextUseCase
 from app.application.use_cases.documents.upload_document import UploadDocumentUseCase
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "ListDocumentsUseCase",
     "DeleteDocumentUseCase",
     "DownloadDocumentUseCase",
+    "ProcessDocumentTextUseCase",
     "DocumentError",
     "DocumentNotFoundError",
     "DuplicateDocumentError",
