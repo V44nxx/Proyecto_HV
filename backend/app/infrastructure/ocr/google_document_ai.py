@@ -2,6 +2,8 @@
 Google Document AI OCR provider adapter.
 """
 
+import json
+import os
 import time
 from typing import Any
 import structlog
@@ -71,7 +73,22 @@ class GoogleDocumentAIProvider(OCRProvider):
         try:
             from google.cloud import documentai_v1 as documentai
 
-            client = documentai.DocumentProcessorServiceClient()
+            client_options = {"api_endpoint": f"{self._settings.google_location}-documentai.googleapis.com"}
+            client_kwargs: dict[str, Any] = {"client_options": client_options}
+
+            sa_json = self._settings.google_service_account_json
+            if sa_json:
+                from google.oauth2 import service_account
+                if os.path.isfile(sa_json):
+                    client_kwargs["credentials"] = service_account.Credentials.from_service_account_file(sa_json)
+                else:
+                    try:
+                        info = json.loads(sa_json)
+                        client_kwargs["credentials"] = service_account.Credentials.from_service_account_info(info)
+                    except Exception:
+                        pass
+
+            client = documentai.DocumentProcessorServiceClient(**client_kwargs)
             name = client.processor_path(
                 self._settings.google_project_id,
                 self._settings.google_location,
