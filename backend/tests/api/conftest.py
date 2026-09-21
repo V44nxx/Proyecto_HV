@@ -5,6 +5,8 @@ Sets up a test FastAPI app with an in-memory SQLite database
 so API tests don't need a real PostgreSQL instance.
 """
 
+import json
+import sqlite3
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -18,6 +20,8 @@ from app.main import create_application
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.types import ARRAY
 from sqlalchemy.dialects.postgresql import JSONB, INET
+
+sqlite3.register_adapter(list, json.dumps)
 
 @compiles(ARRAY, "sqlite")
 def compile_array_sqlite(type_, compiler, **kw):

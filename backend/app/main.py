@@ -107,7 +107,7 @@ def _register_middleware(app: FastAPI) -> None:
 
 def _register_routers(app: FastAPI) -> None:
     """Register all API routers under the versioned prefix."""
-    from app.presentation.api.v1 import auth, documents, health, reviews, users
+    from app.presentation.api.v1 import auth, documents, health, reviews, search, users
 
     prefix = settings.api_v1_prefix
 
@@ -116,6 +116,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(users.router, prefix=prefix)
     app.include_router(documents.router, prefix=prefix)
     app.include_router(reviews.router, prefix=prefix)
+    app.include_router(search.router, prefix=prefix)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -133,6 +134,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
         FileTooLargeError,
         InvalidFileFormatError,
     )
+    from app.application.use_cases.search.exceptions import CandidateNotFoundError
 
     @app.exception_handler(AuthenticationError)
     async def auth_error_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
@@ -179,6 +181,13 @@ def _register_exception_handlers(app: FastAPI) -> None:
     async def file_too_large_handler(request: Request, exc: FileTooLargeError) -> JSONResponse:
         return JSONResponse(
             status_code=413,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(CandidateNotFoundError)
+    async def candidate_not_found_handler(request: Request, exc: CandidateNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=404,
             content={"detail": exc.message},
         )
 

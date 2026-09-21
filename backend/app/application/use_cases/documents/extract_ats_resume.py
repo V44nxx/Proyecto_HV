@@ -24,6 +24,7 @@ from app.infrastructure.database.models.person_models import (
 from app.infrastructure.database.models.resume_models import (
     Education,
     Language,
+    ProfessionalProfile,
     WorkExperience,
 )
 from app.infrastructure.database.repositories.document_repository import DocumentRepository
@@ -192,7 +193,18 @@ class ExtractAtsResumeUseCase:
         ]
         await self._person_repo.save_languages(language_models)
 
-        # 9. Persist Extracted Fields for traceability
+        # 9. Persist ProfessionalProfile (skills & executive summary)
+        skills = canonical_resume.metadata.get("skills", [])
+        summary = canonical_resume.metadata.get("profile_summary")
+        if skills or summary:
+            profile_model = ProfessionalProfile(
+                person_id=saved_person.id,
+                summary=summary,
+                skills=skills,
+            )
+            await self._person_repo.save_professional_profile(profile_model)
+
+        # 10. Persist Extracted Fields for traceability
         if extraction_map and canonical_resume.extracted_fields:
             field_models: list[ExtractedField] = []
             for item in canonical_resume.extracted_fields:

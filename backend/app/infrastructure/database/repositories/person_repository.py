@@ -18,6 +18,7 @@ from app.infrastructure.database.models.resume_models import (
     Education,
     ExperienceSummary,
     Language,
+    ProfessionalProfile,
     WorkExperience,
 )
 
@@ -157,6 +158,28 @@ class PersonRepository:
         self._db.add_all(languages)
         await self._db.flush()
         return languages
+
+    async def save_professional_profile(
+        self, profile: ProfessionalProfile
+    ) -> ProfessionalProfile:
+        """Create or update professional profile for a person."""
+        stmt = select(ProfessionalProfile).where(
+            ProfessionalProfile.person_id == profile.person_id
+        )
+        result = await self._db.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if profile.summary is not None:
+                existing.summary = profile.summary
+            if profile.skills is not None:
+                existing.skills = profile.skills
+            await self._db.flush()
+            return existing
+
+        self._db.add(profile)
+        await self._db.flush()
+        return profile
 
     async def save_extracted_fields(
         self, fields: list[ExtractedField]

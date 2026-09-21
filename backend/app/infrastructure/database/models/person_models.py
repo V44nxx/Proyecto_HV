@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infrastructure.database.base import (
     Base,
     SoftDeleteMixin,
+    StringArray,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
@@ -56,7 +57,7 @@ class Profession(Base, UUIDPrimaryKeyMixin):
         UUID(as_uuid=True), ForeignKey("professional_categories.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
-    aliases: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    aliases: Mapped[list[str] | None] = mapped_column(StringArray, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     category: Mapped["ProfessionalCategory"] = relationship(

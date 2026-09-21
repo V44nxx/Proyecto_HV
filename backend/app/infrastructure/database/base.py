@@ -5,17 +5,46 @@ All ORM models must inherit from Base.
 Shared concerns (timestamps, soft-delete, UUID PKs) live here.
 """
 
+import json
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import ARRAY, Text, TypeDecorator
 
 
 def utcnow() -> datetime:
     """Always-aware UTC datetime."""
     return datetime.now(tz=timezone.utc)
+
+
+class StringArray(TypeDecorator):
+    """
+    Cross-dialect array type that uses native PostgreSQL ARRAY(Text)
+    in production and JSON-serialized TEXT in SQLite for testing.
+    """
+    impl = ARRAY(Text)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(Text())
+        return dialect.type_descriptor(ARRAY(Text()))
+
+    def process_bind_param(self, value, dialect):
+        if dialect.name == "sqlite":
+            return json.dumps(value) if value is not None else None
+        return value
+
+    def process_result_value(self, value, dialect):
+        if dialect.name == "sqlite" and isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return [value]
+        return value
 
 
 class Base(DeclarativeBase):

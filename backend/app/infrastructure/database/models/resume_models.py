@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import (
     Base,
+    StringArray,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
     utcnow,
@@ -252,7 +253,7 @@ class ProfessionalProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    skills: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    skills: Mapped[list[str] | None] = mapped_column(StringArray, nullable=True)
 
     source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
