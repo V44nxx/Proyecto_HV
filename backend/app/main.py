@@ -78,6 +78,7 @@ def create_application() -> FastAPI:
 
     # ---- Routers ----
     _register_routers(app)
+    _register_exception_handlers(app)
 
     return app
 
@@ -106,17 +107,42 @@ def _register_middleware(app: FastAPI) -> None:
 
 def _register_routers(app: FastAPI) -> None:
     """Register all API routers under the versioned prefix."""
-    from app.presentation.api.v1 import health
+    from app.presentation.api.v1 import auth, health, users
 
     prefix = settings.api_v1_prefix
 
     app.include_router(health.router, prefix=prefix, tags=["Sistema"])
+    app.include_router(auth.router, prefix=prefix)
+    app.include_router(users.router, prefix=prefix)
 
     # Remaining routers will be added in later phases:
-    # app.include_router(auth.router, prefix=prefix, tags=["Autenticación"])
     # app.include_router(documents.router, prefix=prefix, tags=["Documentos"])
     # app.include_router(persons.router, prefix=prefix, tags=["Personas"])
     # etc.
+
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    """Map domain exceptions to HTTP responses."""
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+    from app.application.use_cases.auth.exceptions import (
+        AuthenticationError,
+        AuthorizationError,
+    )
+
+    @app.exception_handler(AuthenticationError)
+    async def auth_error_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(AuthorizationError)
+    async def authz_error_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": exc.message},
+        )
 
 
 # Application instance (used by Gunicorn/Uvicorn)

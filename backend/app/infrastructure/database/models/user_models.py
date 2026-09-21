@@ -1,11 +1,21 @@
 """
-ORM models: users, roles, permissions, role_permissions.
+ORM models: users, roles, permissions, role_permissions, audit_logs.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, SmallInteger, String, Text
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import (
@@ -13,6 +23,7 @@ from app.infrastructure.database.base import (
     SoftDeleteMixin,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
+    utcnow,
 )
 
 
@@ -25,7 +36,6 @@ class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # Relationships
     role_permissions: Mapped[list["RolePermission"]] = relationship(
         "RolePermission", back_populates="role", cascade="all, delete-orphan"
     )
@@ -36,10 +46,7 @@ class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 
 class Permission(Base, UUIDPrimaryKeyMixin):
-    """
-    Granular permissions in the format resource:action.
-    Example: documents:read, reports:export
-    """
+    """Granular permissions in the format resource:action."""
 
     __tablename__ = "permissions"
 
@@ -48,8 +55,7 @@ class Permission(Base, UUIDPrimaryKeyMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        # A resource+action combination must be unique
-        __import__("sqlalchemy").UniqueConstraint("resource", "action", name="uq_permission_resource_action"),
+        UniqueConstraint("resource", "action", name="uq_permission_resource_action"),
     )
 
     role_permissions: Mapped[list["RolePermission"]] = relationship(
@@ -77,15 +83,15 @@ class RolePermission(Base):
     )
 
     role: Mapped["Role"] = relationship("Role", back_populates="role_permissions")
-    permission: Mapped["Permission"] = relationship("Permission", back_populates="role_permissions")
+    permission: Mapped["Permission"] = relationship(
+        "Permission", back_populates="role_permissions"
+    )
 
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     """
     System users.
-
-    Passwords are stored as Argon2id hashes — NEVER plaintext.
-    Sensitive fields (email, full_name) are not logged in audit records.
+    Passwords stored as Argon2id hashes — NEVER plaintext.
     """
 
     __tablename__ = "users"
@@ -105,32 +111,31 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     # Lockout tracking
     failed_login_count: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
-    locked_until: Mapped[str | None] = mapped_column(
-        __import__("sqlalchemy").DateTime(timezone=True), nullable=True
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
-    # Timestamps
-    last_login_at: Mapped[str | None] = mapped_column(
-        __import__("sqlalchemy").DateTime(timezone=True), nullable=True
+    # Auth timestamps
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
-    password_changed_at: Mapped[str | None] = mapped_column(
-        __import__("sqlalchemy").DateTime(timezone=True), nullable=True
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
-    # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
     audit_logs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog", back_populates="user", foreign_keys="AuditLog.user_id"
     )
 
     def __repr__(self) -> str:
-        return f"<User email={self.email} role={self.role_id}>"
+        return f"<User email={self.email}>"
 
 
 class AuditLog(Base, UUIDPrimaryKeyMixin):
     """
     Immutable audit trail.
-    Records are NEVER updated or deleted.
+    Never updated or deleted.
     Sensitive values (passwords, full PII) are NEVER stored here.
     """
 
@@ -147,13 +152,11 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
     resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
-    details: Mapped[dict | None] = mapped_column(
-        __import__("sqlalchemy").dialects.postgresql.JSONB, nullable=True
-    )
-    created_at: Mapped[__import__("datetime").datetime] = mapped_column(
-        __import__("sqlalchemy").DateTime(timezone=True),
-        default=__import__("app.infrastructure.database.base", fromlist=["utcnow"]).utcnow,
-        server_default=__import__("sqlalchemy").text("NOW()"),
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        server_default=text("NOW()"),
         nullable=False,
         index=True,
     )
