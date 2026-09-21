@@ -107,18 +107,14 @@ def _register_middleware(app: FastAPI) -> None:
 
 def _register_routers(app: FastAPI) -> None:
     """Register all API routers under the versioned prefix."""
-    from app.presentation.api.v1 import auth, health, users
+    from app.presentation.api.v1 import auth, documents, health, users
 
     prefix = settings.api_v1_prefix
 
     app.include_router(health.router, prefix=prefix, tags=["Sistema"])
     app.include_router(auth.router, prefix=prefix)
     app.include_router(users.router, prefix=prefix)
-
-    # Remaining routers will be added in later phases:
-    # app.include_router(documents.router, prefix=prefix, tags=["Documentos"])
-    # app.include_router(persons.router, prefix=prefix, tags=["Personas"])
-    # etc.
+    app.include_router(documents.router, prefix=prefix)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -128,6 +124,13 @@ def _register_exception_handlers(app: FastAPI) -> None:
     from app.application.use_cases.auth.exceptions import (
         AuthenticationError,
         AuthorizationError,
+    )
+    from app.application.use_cases.documents.exceptions import (
+        DocumentError,
+        DocumentNotFoundError,
+        DuplicateDocumentError,
+        FileTooLargeError,
+        InvalidFileFormatError,
     )
 
     @app.exception_handler(AuthenticationError)
@@ -141,6 +144,40 @@ def _register_exception_handlers(app: FastAPI) -> None:
     async def authz_error_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
         return JSONResponse(
             status_code=403,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(DocumentNotFoundError)
+    async def doc_not_found_handler(request: Request, exc: DocumentNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(DuplicateDocumentError)
+    async def duplicate_doc_handler(request: Request, exc: DuplicateDocumentError) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "message": exc.message,
+                    "existing_document_id": str(exc.existing_document_id),
+                    "existing_filename": exc.existing_filename,
+                }
+            },
+        )
+
+    @app.exception_handler(InvalidFileFormatError)
+    async def invalid_file_handler(request: Request, exc: InvalidFileFormatError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": exc.message},
+        )
+
+    @app.exception_handler(FileTooLargeError)
+    async def file_too_large_handler(request: Request, exc: FileTooLargeError) -> JSONResponse:
+        return JSONResponse(
+            status_code=413,
             content={"detail": exc.message},
         )
 

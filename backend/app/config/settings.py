@@ -33,7 +33,7 @@ class OCRProviderName(StrEnum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -51,7 +51,10 @@ class Settings(BaseSettings):
     backend_port: int = 8000
 
     # ---- Security ----
-    secret_key: str = Field(min_length=32)
+    secret_key: str = Field(
+        default="development-secret-key-at-least-32-chars-long-for-tests",
+        min_length=32,
+    )
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
     argon2_time_cost: int = 3
@@ -64,7 +67,10 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str = "proyecto_hv"
     postgres_user: str = "hv_app"
-    postgres_password: str = Field(min_length=8)
+    postgres_password: str = Field(
+        default="hv_dev_password",
+        min_length=8,
+    )
 
     @property
     def database_url(self) -> str:
@@ -135,6 +141,20 @@ class Settings(BaseSettings):
     # ---- Rate Limiting ----
     rate_limit_auth_per_minute: int = 10
     rate_limit_api_per_minute: int = 60
+
+    @field_validator("cors_allowed_origins", "allowed_mime_types", mode="before")
+    @classmethod
+    def parse_comma_separated_list(cls, v: object) -> object:
+        if isinstance(v, str):
+            v_trimmed = v.strip()
+            if v_trimmed.startswith("[") and v_trimmed.endswith("]"):
+                import json
+                try:
+                    return json.loads(v_trimmed)
+                except Exception:
+                    pass
+            return [item.strip() for item in v_trimmed.split(",") if item.strip()]
+        return v
 
     @field_validator("app_env", mode="before")
     @classmethod

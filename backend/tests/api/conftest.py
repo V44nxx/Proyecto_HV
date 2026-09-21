@@ -15,6 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.infrastructure.database.base import Base
 from app.infrastructure.database.session import get_db_session
 from app.main import create_application
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import ARRAY
+from sqlalchemy.dialects.postgresql import JSONB, INET
+
+@compiles(ARRAY, "sqlite")
+def compile_array_sqlite(type_, compiler, **kw):
+    return "TEXT"
+
+@compiles(JSONB, "sqlite")
+def compile_jsonb_sqlite(type_, compiler, **kw):
+    return "JSON"
+
+@compiles(INET, "sqlite")
+def compile_inet_sqlite(type_, compiler, **kw):
+    return "VARCHAR(45)"
 
 # Use SQLite for test isolation (no PostgreSQL required)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
