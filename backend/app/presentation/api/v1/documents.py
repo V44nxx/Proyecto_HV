@@ -27,6 +27,7 @@ from fastapi import (
     status,
 )
 
+from app.application.use_cases.documents.classify_document import ClassifyDocumentUseCase
 from app.application.use_cases.documents.delete_document import DeleteDocumentUseCase
 from app.application.use_cases.documents.download_document import DownloadDocumentUseCase
 from app.application.use_cases.documents.exceptions import (
@@ -50,6 +51,7 @@ from app.presentation.dependencies.document_dependencies import (
     UserRepo,
 )
 from app.presentation.schemas.document_schemas import (
+    ClassificationResponse,
     DocumentDetailResponse,
     DocumentExtractionResponse,
     DocumentListResponse,
@@ -381,3 +383,90 @@ async def get_document_extractions(
 
     extractions = await document_repo.get_extractions_for_document(document_id)
     return [DocumentExtractionResponse.model_validate(e) for e in extractions]
+
+
+@router.post(
+    "/{document_id}/classify",
+    response_model=ClassificationResponse,
+    summary="Clasificar formato de hoja de vida (Formato Único DAFP vs ATS)",
+    dependencies=[require_permission("documents", "write")],
+)
+async def classify_document_endpoint(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    storage: Storage,
+) -> ClassificationResponse:
+    """
+    Ejecuta el servicio de clasificación sobre el documento para determinar si es
+    Formato Único de la Función Pública, ATS o Desconocido.
+    """
+    use_case = ClassifyDocumentUseCase(
+        document_repo=document_repo,
+        storage_provider=storage,
+    )
+    try:
+        result = await use_case.execute(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=exc.message,
+        ) from exc
+    except Exception as exc:
+        logger.error("classification_failed", document_id=str(document_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante la clasificación del documento: {exc}",
+        ) from exc
+
+    return ClassificationResponse(
+        message="Clasificación de documento completada exitosamente",
+        document_id=document_id,
+        document_type=result.document_type.value if hasattr(result.document_type, "value") else str(result.document_type),
+        confidence=result.confidence,
+        matched_indicators=result.matched_indicators,
+        scores=result.scores,
+        detected_sections=result.detected_sections,
+        reasons=result.reasons,
+        is_definitive=result.is_definitive,
+    )
+
+
+@router.get(
+    "/{document_id}/classification",
+    response_model=ClassificationResponse,
+    summary="Consultar resultado de clasificación del documento",
+    dependencies=[require_permission("documents", "read")],
+)
+async def get_document_classification_endpoint(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    storage: Storage,
+) -> ClassificationResponse:
+    """
+    Retorna la clasificación del documento o la ejecuta si aún no se ha realizado.
+    """
+    doc = await document_repo.get_by_id(document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Documento con ID {document_id} no encontrado.",
+        )
+
+    use_case = ClassifyDocumentUseCase(
+        document_repo=document_repo,
+        storage_provider=storage,
+    )
+    result = await use_case.execute(document_id)
+
+    return ClassificationResponse(
+        message="Consulta de clasificación exitosa",
+        document_id=document_id,
+        document_type=result.document_type.value if hasattr(result.document_type, "value") else str(result.document_type),
+        confidence=result.confidence,
+        matched_indicators=result.matched_indicators,
+        scores=result.scores,
+        detected_sections=result.detected_sections,
+        reasons=result.reasons,
+        is_definitive=result.is_definitive,
+    )
+

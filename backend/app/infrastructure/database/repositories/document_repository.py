@@ -230,3 +230,14 @@ class DocumentRepository:
         )
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
+
+    async def update_document_type(
+        self, document_id: uuid.UUID, document_type: str
+    ) -> Document | None:
+        """Update the classified document_type of a document."""
+        document = await self.get_by_id(document_id)
+        if not document:
+            return None
+        document.document_type = document_type
+        await self._db.flush()
+        return document

@@ -97,3 +97,18 @@ class ProcessTextResponse(BaseModel):
     overall_confidence: float
     processing_ms: int
     full_text_preview: str
+
+
+class ClassificationResponse(BaseModel):
+    """Response returned upon classifying a document format."""
+
+    message: str = "Clasificación de documento completada exitosamente"
+    document_id: uuid.UUID
+    document_type: str
+    confidence: float
+    matched_indicators: list[str] = Field(default_factory=list)
+    scores: dict[str, float] = Field(default_factory=dict)
+    detected_sections: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    is_definitive: bool
+

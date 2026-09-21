@@ -101,6 +101,11 @@ class PDFTextExtractor:
         finally:
             doc.close()
 
+    @classmethod
+    def extract_native_document(cls, pdf_bytes: bytes) -> OCRDocumentResult:
+        """Convenience class method to extract native document text."""
+        return cls().extract_document(pdf_bytes)
+
     def render_page_image(
         self, pdf_bytes: bytes, page_number: int, dpi: int = 150
     ) -> bytes:

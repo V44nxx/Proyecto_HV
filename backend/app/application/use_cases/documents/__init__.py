@@ -2,6 +2,7 @@
 Document use cases exports.
 """
 
+from app.application.use_cases.documents.classify_document import ClassifyDocumentUseCase
 from app.application.use_cases.documents.delete_document import DeleteDocumentUseCase
 from app.application.use_cases.documents.download_document import DownloadDocumentUseCase
 from app.application.use_cases.documents.exceptions import (
@@ -23,9 +24,11 @@ __all__ = [
     "DeleteDocumentUseCase",
     "DownloadDocumentUseCase",
     "ProcessDocumentTextUseCase",
+    "ClassifyDocumentUseCase",
     "DocumentError",
     "DocumentNotFoundError",
     "DuplicateDocumentError",
     "FileTooLargeError",
     "InvalidFileFormatError",
 ]
+
