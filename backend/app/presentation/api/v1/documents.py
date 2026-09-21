@@ -36,6 +36,8 @@ from app.application.use_cases.documents.exceptions import (
     FileTooLargeError,
     InvalidFileFormatError,
 )
+from app.application.use_cases.documents.extract_formato_unico import ExtractFormatoUnicoUseCase
+from app.application.use_cases.documents.get_canonical_resume import GetCanonicalResumeUseCase
 from app.application.use_cases.documents.get_document import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents import ListDocumentsUseCase
 from app.application.use_cases.documents.process_document_text import ProcessDocumentTextUseCase
@@ -47,10 +49,18 @@ from app.presentation.dependencies.auth import (
 from app.presentation.dependencies.document_dependencies import (
     DocumentRepo,
     OCR,
+    PersonRepo,
     Storage,
     UserRepo,
 )
 from app.presentation.schemas.document_schemas import (
+    CanonicalContactResponse,
+    CanonicalEducationResponse,
+    CanonicalExperienceSummaryResponse,
+    CanonicalLanguageResponse,
+    CanonicalPersonResponse,
+    CanonicalResumeResponse,
+    CanonicalWorkExperienceResponse,
     ClassificationResponse,
     DocumentDetailResponse,
     DocumentExtractionResponse,
@@ -469,4 +479,218 @@ async def get_document_classification_endpoint(
         reasons=result.reasons,
         is_definitive=result.is_definitive,
     )
+
+
+@router.post(
+    "/{document_id}/extract-formato-unico",
+    response_model=CanonicalResumeResponse,
+    summary="Extraer datos estructurados de Formato Único DAFP",
+    dependencies=[require_permission("documents", "write")],
+)
+async def extract_formato_unico_endpoint(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    person_repo: PersonRepo,
+    storage: Storage,
+) -> CanonicalResumeResponse:
+    """
+    Ejecuta el extractor especializado de Formato Único sobre el documento,
+    asociando o creando el registro de la persona, sus estudios, experiencia laboral,
+    idiomas y trazabilidad por campo.
+    """
+    use_case = ExtractFormatoUnicoUseCase(
+        document_repo=document_repo,
+        person_repo=person_repo,
+        storage_provider=storage,
+    )
+    try:
+        resume = await use_case.execute(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=exc.message,
+        ) from exc
+    except Exception as exc:
+        logger.error("formato_unico_extraction_failed", document_id=str(document_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante la extracción de Formato Único: {exc}",
+        ) from exc
+
+    doc = await document_repo.get_by_id(document_id)
+    resume_dict = resume.to_dict()
+
+    return CanonicalResumeResponse(
+        message="Extracción canónica completada exitosamente",
+        document_id=document_id,
+        person_id=doc.person_id if doc else None,
+        person=CanonicalPersonResponse(**resume_dict["person"]),
+        contact=CanonicalContactResponse(**resume_dict["contact"]),
+        educations=[CanonicalEducationResponse(**e) for e in resume_dict["educations"]],
+        work_experiences=[CanonicalWorkExperienceResponse(**w) for w in resume_dict["work_experiences"]],
+        experience_summary=CanonicalExperienceSummaryResponse(**resume_dict["experience_summary"]) if resume_dict["experience_summary"] else None,
+        languages=[CanonicalLanguageResponse(**l) for l in resume_dict["languages"]],
+        extracted_fields_count=resume_dict["extracted_fields_count"],
+    )
+
+
+@router.get(
+    "/{document_id}/canonical-resume",
+    response_model=CanonicalResumeResponse,
+    summary="Consultar hoja de vida canónica extraída del documento",
+    dependencies=[require_permission("documents", "read")],
+)
+async def get_canonical_resume_endpoint(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    person_repo: PersonRepo,
+    storage: Storage,
+) -> CanonicalResumeResponse:
+    """
+    Retorna la información canónica estructurada asociada al documento.
+    """
+    doc = await document_repo.get_by_id(document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Documento con ID {document_id} no encontrado.",
+        )
+
+    get_use_case = GetCanonicalResumeUseCase(
+        document_repo=document_repo,
+        person_repo=person_repo,
+    )
+    person = await get_use_case.execute(document_id)
+
+    if not person:
+        # If extraction hasn't been run yet, trigger it
+        extract_use_case = ExtractFormatoUnicoUseCase(
+            document_repo=document_repo,
+            person_repo=person_repo,
+            storage_provider=storage,
+        )
+        resume = await extract_use_case.execute(document_id)
+        doc = await document_repo.get_by_id(document_id)
+        resume_dict = resume.to_dict()
+        return CanonicalResumeResponse(
+            message="Extracción canónica completada exitosamente",
+            document_id=document_id,
+            person_id=doc.person_id if doc else None,
+            person=CanonicalPersonResponse(**resume_dict["person"]),
+            contact=CanonicalContactResponse(**resume_dict["contact"]),
+            educations=[CanonicalEducationResponse(**e) for e in resume_dict["educations"]],
+            work_experiences=[CanonicalWorkExperienceResponse(**w) for w in resume_dict["work_experiences"]],
+            experience_summary=CanonicalExperienceSummaryResponse(**resume_dict["experience_summary"]) if resume_dict["experience_summary"] else None,
+            languages=[CanonicalLanguageResponse(**l) for l in resume_dict["languages"]],
+            extracted_fields_count=resume_dict["extracted_fields_count"],
+        )
+
+    # Build response from saved person and relationships
+    contact_dict = {
+        "address": person.contact_information.address if person.contact_information else None,
+        "country": person.contact_information.country if person.contact_information else None,
+        "department": person.contact_information.department if person.contact_information else None,
+        "municipality": person.contact_information.municipality if person.contact_information else None,
+        "telephone": person.contact_information.telephone if person.contact_information else None,
+        "mobile_phone": person.contact_information.mobile_phone if person.contact_information else None,
+        "email": person.contact_information.email if person.contact_information else None,
+    }
+
+    person_dict = {
+        "identification_type": person.identification_type,
+        "identification_number": person.identification_number,
+        "first_surname": person.first_surname,
+        "second_surname": person.second_surname,
+        "first_name": person.first_name,
+        "middle_name": person.middle_name,
+        "full_name": f"{person.first_name or ''} {person.first_surname or ''}".strip(),
+        "sex": person.sex,
+        "nationality": person.nationality,
+        "birth_date": person.birth_date.isoformat() if person.birth_date else None,
+        "birth_country": person.birth_country,
+        "birth_department": person.birth_department,
+        "birth_municipality": person.birth_municipality,
+        "military_card_number": person.military_card_number,
+        "military_card_district": person.military_card_district,
+        "military_card_class": person.military_card_class,
+    }
+
+    educations_list = [
+        CanonicalEducationResponse(
+            level=e.level,
+            institution=e.institution,
+            program=e.program,
+            academic_modality=e.academic_modality,
+            semesters_count=e.semesters_count,
+            graduation_status=e.graduation_status,
+            degree_title=e.degree_title,
+            professional_card_no=e.professional_card_no,
+            completion_month=e.completion_month,
+            completion_year=e.completion_year,
+            country=e.country,
+            department=e.department,
+            municipality=e.municipality,
+            source_page=e.source_page,
+        )
+        for e in (person.educations or [])
+    ]
+
+    experiences_list = [
+        CanonicalWorkExperienceResponse(
+            company_name=w.company_name,
+            sector=w.sector,
+            position=w.position,
+            department_unit=w.department_unit,
+            country=w.country,
+            department=w.department,
+            municipality=w.municipality,
+            address=w.address,
+            telephone=w.telephone,
+            entity_email=w.entity_email,
+            start_date=w.start_date.isoformat() if w.start_date else None,
+            end_date=w.end_date.isoformat() if w.end_date else None,
+            is_current=w.is_current,
+            responsibilities=w.responsibilities,
+            source_page=w.source_page,
+        )
+        for w in (person.work_experiences or [])
+    ]
+
+    summary_resp = None
+    if person.experience_summary:
+        summary_resp = CanonicalExperienceSummaryResponse(
+            public_years=person.experience_summary.public_years,
+            public_months=person.experience_summary.public_months,
+            private_years=person.experience_summary.private_years,
+            private_months=person.experience_summary.private_months,
+            independent_years=person.experience_summary.independent_years,
+            independent_months=person.experience_summary.independent_months,
+            total_years=person.experience_summary.total_years,
+            total_months=person.experience_summary.total_months,
+        )
+
+    languages_list = [
+        CanonicalLanguageResponse(
+            language_name=l.language_name,
+            speaking=l.speaking,
+            reading=l.reading,
+            writing=l.writing,
+            source_page=l.source_page,
+        )
+        for l in (person.languages or [])
+    ]
+
+    return CanonicalResumeResponse(
+        message="Consulta de hoja de vida canónica exitosa",
+        document_id=document_id,
+        person_id=person.id,
+        person=CanonicalPersonResponse(**person_dict),
+        contact=CanonicalContactResponse(**contact_dict),
+        educations=educations_list,
+        work_experiences=experiences_list,
+        experience_summary=summary_resp,
+        languages=languages_list,
+        extracted_fields_count=len(educations_list) + len(experiences_list),
+    )
+
 

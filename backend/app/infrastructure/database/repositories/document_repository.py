@@ -241,3 +241,15 @@ class DocumentRepository:
         document.document_type = document_type
         await self._db.flush()
         return document
+
+    async def link_person_to_document(
+        self, document_id: uuid.UUID, person_id: uuid.UUID
+    ) -> Document | None:
+        """Associate a person record with an uploaded document."""
+        document = await self.get_by_id(document_id)
+        if not document:
+            return None
+        document.person_id = person_id
+        await self._db.flush()
+        return document
+

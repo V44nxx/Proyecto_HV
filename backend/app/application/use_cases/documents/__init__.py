@@ -12,6 +12,8 @@ from app.application.use_cases.documents.exceptions import (
     FileTooLargeError,
     InvalidFileFormatError,
 )
+from app.application.use_cases.documents.extract_formato_unico import ExtractFormatoUnicoUseCase
+from app.application.use_cases.documents.get_canonical_resume import GetCanonicalResumeUseCase
 from app.application.use_cases.documents.get_document import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents import ListDocumentsUseCase
 from app.application.use_cases.documents.process_document_text import ProcessDocumentTextUseCase
@@ -25,6 +27,8 @@ __all__ = [
     "DownloadDocumentUseCase",
     "ProcessDocumentTextUseCase",
     "ClassifyDocumentUseCase",
+    "ExtractFormatoUnicoUseCase",
+    "GetCanonicalResumeUseCase",
     "DocumentError",
     "DocumentNotFoundError",
     "DuplicateDocumentError",
