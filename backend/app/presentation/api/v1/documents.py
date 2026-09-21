@@ -36,6 +36,7 @@ from app.application.use_cases.documents.exceptions import (
     FileTooLargeError,
     InvalidFileFormatError,
 )
+from app.application.use_cases.documents.extract_ats_resume import ExtractAtsResumeUseCase
 from app.application.use_cases.documents.extract_formato_unico import ExtractFormatoUnicoUseCase
 from app.application.use_cases.documents.get_canonical_resume import GetCanonicalResumeUseCase
 from app.application.use_cases.documents.get_document import GetDocumentUseCase
@@ -534,6 +535,58 @@ async def extract_formato_unico_endpoint(
     )
 
 
+@router.post(
+    "/{document_id}/extract-ats",
+    response_model=CanonicalResumeResponse,
+    summary="Extraer datos estructurados de hoja de vida en formato libre (ATS)",
+    dependencies=[require_permission("documents", "write")],
+)
+async def extract_ats_endpoint(
+    document_id: uuid.UUID,
+    document_repo: DocumentRepo,
+    person_repo: PersonRepo,
+    storage: Storage,
+) -> CanonicalResumeResponse:
+    """
+    Ejecuta el pipeline de extracción heurística ATS para hojas de vida abiertas
+    en español e inglés, mapeando los resultados al modelo canónico común.
+    """
+    use_case = ExtractAtsResumeUseCase(
+        document_repo=document_repo,
+        person_repo=person_repo,
+        storage_provider=storage,
+    )
+    try:
+        resume = await use_case.execute(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=exc.message,
+        ) from exc
+    except Exception as exc:
+        logger.error("ats_extraction_failed", document_id=str(document_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante la extracción de hoja de vida ATS: {exc}",
+        ) from exc
+
+    doc = await document_repo.get_by_id(document_id)
+    resume_dict = resume.to_dict()
+
+    return CanonicalResumeResponse(
+        message="Extracción ATS completada exitosamente",
+        document_id=document_id,
+        person_id=doc.person_id if doc else None,
+        person=CanonicalPersonResponse(**resume_dict["person"]),
+        contact=CanonicalContactResponse(**resume_dict["contact"]),
+        educations=[CanonicalEducationResponse(**e) for e in resume_dict["educations"]],
+        work_experiences=[CanonicalWorkExperienceResponse(**w) for w in resume_dict["work_experiences"]],
+        experience_summary=CanonicalExperienceSummaryResponse(**resume_dict["experience_summary"]) if resume_dict["experience_summary"] else None,
+        languages=[CanonicalLanguageResponse(**l) for l in resume_dict["languages"]],
+        extracted_fields_count=resume_dict["extracted_fields_count"],
+    )
+
+
 @router.get(
     "/{document_id}/canonical-resume",
     response_model=CanonicalResumeResponse,
@@ -563,13 +616,21 @@ async def get_canonical_resume_endpoint(
     person = await get_use_case.execute(document_id)
 
     if not person:
-        # If extraction hasn't been run yet, trigger it
-        extract_use_case = ExtractFormatoUnicoUseCase(
-            document_repo=document_repo,
-            person_repo=person_repo,
-            storage_provider=storage,
-        )
-        resume = await extract_use_case.execute(document_id)
+        # If extraction hasn't been run yet, trigger it based on document_type
+        if doc.document_type == DocumentType.ATS.value:
+            ats_use_case = ExtractAtsResumeUseCase(
+                document_repo=document_repo,
+                person_repo=person_repo,
+                storage_provider=storage,
+            )
+            resume = await ats_use_case.execute(document_id)
+        else:
+            extract_use_case = ExtractFormatoUnicoUseCase(
+                document_repo=document_repo,
+                person_repo=person_repo,
+                storage_provider=storage,
+            )
+            resume = await extract_use_case.execute(document_id)
         doc = await document_repo.get_by_id(document_id)
         resume_dict = resume.to_dict()
         return CanonicalResumeResponse(
