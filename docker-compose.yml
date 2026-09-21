@@ -1,0 +1,152 @@
+# ============================================================
+# Docker Compose — Development
+# ============================================================
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f backend
+#   docker compose exec backend alembic upgrade head
+# ============================================================
+
+name: proyecto-hv
+
+services:
+
+  # ---- PostgreSQL ----
+  postgres:
+    image: postgres:16-alpine
+    container_name: hv_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-proyecto_hv}
+      POSTGRES_USER: ${POSTGRES_USER:-hv_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Performance tuning for development VPS
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=es_CO.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    ports:
+      - "5432:5432"  # Exposed for local dev tools; restrict in production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hv_app} -d ${POSTGRES_DB:-proyecto_hv}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hv_network
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    container_name: hv_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_dev_password} --save 60 1000
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"  # Exposed for local dev; restrict in production
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hv_network
+
+  # ---- Backend (FastAPI) ----
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: hv_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      STORAGE_LOCAL_PATH: /app/data/documents
+    volumes:
+      - ./backend:/app:cached          # Hot reload in development
+      - documents_data:/app/data/documents
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - hv_network
+
+  # ---- Worker (ARQ) ----
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: hv_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      STORAGE_LOCAL_PATH: /app/data/documents
+    volumes:
+      - ./backend:/app:cached
+      - documents_data:/app/data/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      python -m arq app.workers.document_processing.tasks.WorkerSettings
+    networks:
+      - hv_network
+
+  # ---- Frontend (Vite dev server) ----
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hv_frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api/v1
+    networks:
+      - hv_network
+
+# ---- Volumes ----
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  documents_data:
+    driver: local
+
+# ---- Networks ----
+networks:
+  hv_network:
+    driver: bridge
