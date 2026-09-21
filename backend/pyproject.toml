@@ -55,6 +55,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "tenacity>=9.0.0",          # Retry logic
     "ulid-py>=1.1.0",           # ULID for ordered UUIDs where needed
+    "aiofiles>=24.1.0",
+    "google-cloud-documentai>=2.29.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
