@@ -262,6 +262,7 @@ class SearchRepository:
             .options(
                 selectinload(Person.contact_information),
                 selectinload(Person.primary_profession),
+                selectinload(Person.primary_category),
                 selectinload(Person.educations),
                 selectinload(Person.work_experiences),
                 selectinload(Person.experience_summary),

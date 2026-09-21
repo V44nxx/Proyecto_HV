@@ -112,6 +112,7 @@ def _register_routers(app: FastAPI) -> None:
         dashboard,
         documents,
         health,
+        reports,
         reviews,
         search,
         users,
@@ -126,6 +127,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(reviews.router, prefix=prefix)
     app.include_router(search.router, prefix=prefix)
     app.include_router(dashboard.router, prefix=prefix)
+    app.include_router(reports.router, prefix=prefix)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:

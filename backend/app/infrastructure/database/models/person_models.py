@@ -134,6 +134,9 @@ class Person(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     primary_profession: Mapped["Profession | None"] = relationship(
         "Profession", back_populates="persons", foreign_keys=[primary_profession_id]
     )
+    primary_category: Mapped["ProfessionalCategory | None"] = relationship(
+        "ProfessionalCategory", foreign_keys=[primary_category_id], lazy="selectin"
+    )
     contact_information: Mapped["ContactInformation | None"] = relationship(
         "ContactInformation", back_populates="person", uselist=False, cascade="all, delete-orphan"
     )
