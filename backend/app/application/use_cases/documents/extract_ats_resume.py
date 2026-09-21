@@ -13,7 +13,10 @@ from app.application.interfaces.storage_provider import StorageProvider
 from app.application.use_cases.documents.exceptions import DocumentNotFoundError
 from app.config.constants import JobStatus
 from app.domain.entities.canonical_resume import CanonicalResume
-from app.infrastructure.database.models.document_models import ExtractedField
+from app.infrastructure.database.models.document_models import (
+    DocumentExtraction,
+    ExtractedField,
+)
 from app.infrastructure.database.models.person_models import (
     ContactInformation,
     Person,
@@ -74,6 +77,21 @@ class ExtractAtsResumeUseCase:
             native_res = PDFTextExtractor.extract_native_document(pdf_bytes)
             page_texts = [p.full_text for p in native_res.pages]
             full_text = "\n\n".join(page_texts)
+
+            # Persist fallback extractions so fields can be linked
+            fallback_extractions = [
+                DocumentExtraction(
+                    document_id=document_id,
+                    ocr_provider="NATIVE_PDF",
+                    raw_text=p.full_text,
+                    confidence=1.0,
+                )
+                for p in native_res.pages
+            ]
+            if fallback_extractions:
+                saved = await self._doc_repo.create_document_extractions(fallback_extractions)
+                for idx, e in enumerate(saved):
+                    extraction_map[idx + 1] = e.id
 
         # 2. Run ATS extractor
         canonical_resume = self._extractor.extract(

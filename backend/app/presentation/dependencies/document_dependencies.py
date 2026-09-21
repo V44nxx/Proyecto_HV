@@ -11,6 +11,7 @@ from app.application.interfaces.ocr_provider import OCRProvider
 from app.application.interfaces.storage_provider import StorageProvider
 from app.infrastructure.database.repositories.document_repository import DocumentRepository
 from app.infrastructure.database.repositories.person_repository import PersonRepository
+from app.infrastructure.database.repositories.review_repository import ReviewRepository
 from app.infrastructure.database.repositories.user_repository import UserRepository
 from app.infrastructure.database.session import get_db_session
 from app.infrastructure.ocr.ocr_factory import get_ocr_provider
@@ -27,6 +28,11 @@ def get_document_repo(db: DbSession) -> DocumentRepository:
 def get_person_repo(db: DbSession) -> PersonRepository:
     """Provides a PersonRepository bound to current DB session."""
     return PersonRepository(db)
+
+
+def get_review_repo(db: DbSession) -> ReviewRepository:
+    """Provides a ReviewRepository bound to current DB session."""
+    return ReviewRepository(db)
 
 
 def get_user_repo(db: DbSession) -> UserRepository:
@@ -46,6 +52,7 @@ def get_ocr() -> OCRProvider:
 
 DocumentRepo = Annotated[DocumentRepository, Depends(get_document_repo)]
 PersonRepo = Annotated[PersonRepository, Depends(get_person_repo)]
+ReviewRepo = Annotated[ReviewRepository, Depends(get_review_repo)]
 UserRepo = Annotated[UserRepository, Depends(get_user_repo)]
 Storage = Annotated[StorageProvider, Depends(get_storage)]
 OCR = Annotated[OCRProvider, Depends(get_ocr)]

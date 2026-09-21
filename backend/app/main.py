@@ -107,7 +107,7 @@ def _register_middleware(app: FastAPI) -> None:
 
 def _register_routers(app: FastAPI) -> None:
     """Register all API routers under the versioned prefix."""
-    from app.presentation.api.v1 import auth, documents, health, users
+    from app.presentation.api.v1 import auth, documents, health, reviews, users
 
     prefix = settings.api_v1_prefix
 
@@ -115,6 +115,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(auth.router, prefix=prefix)
     app.include_router(users.router, prefix=prefix)
     app.include_router(documents.router, prefix=prefix)
+    app.include_router(reviews.router, prefix=prefix)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
