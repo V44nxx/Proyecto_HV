@@ -2,20 +2,24 @@ import { api } from "./api";
 
 export interface CandidateItem {
   id: string;
-  first_name: string;
+  first_name?: string | null;
   middle_name?: string | null;
-  first_surname: string;
+  first_surname?: string | null;
   second_surname?: string | null;
   full_name: string;
   identification_type?: string | null;
   identification_number?: string | null;
   profession_name?: string | null;
+  primary_profession?: string | null;
   category_name?: string | null;
+  primary_category?: string | null;
   department?: string | null;
   municipality?: string | null;
   highest_academic_level?: string | null;
+  top_education?: string | null;
   total_experience_years?: number | null;
   document_count: number;
+  documents_count?: number;
 }
 
 export interface CandidateSearchResponse {
@@ -40,8 +44,8 @@ export interface SearchFacetsResponse {
 }
 
 export interface FilterOptionsResponse {
-  categories: Array<{ id: string; name: string; code: string }>;
-  professions: Array<{ id: string; name: string; category_id: string }>;
+  categories: Array<{ id: string; name: string; code?: string; professions?: Array<{ id: string; name: string; category_id?: string }> }>;
+  professions: Array<{ id: string; name: string; category_id?: string }>;
   academic_levels: string[];
   departments: string[];
 }

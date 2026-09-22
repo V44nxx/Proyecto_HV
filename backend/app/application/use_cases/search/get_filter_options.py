@@ -44,6 +44,7 @@ class GetFilterOptionsUseCase:
             categories = await self._search_repo.list_categories_with_professions()
 
         cat_options: list[CategoryOption] = []
+        all_professions: list[ProfessionOption] = []
         for cat in categories:
             prof_options = []
             for p in cat.professions:
@@ -55,24 +56,29 @@ class GetFilterOptionsUseCase:
                             aliases = json.loads(aliases)
                         except Exception:
                             aliases = [aliases]
-                    prof_options.append(
-                        ProfessionOption(
-                            id=p.id,
-                            name=p.name,
-                            aliases=aliases,
-                        )
+                    prof_item = ProfessionOption(
+                        id=p.id,
+                        name=p.name,
+                        category_id=cat.id,
+                        aliases=aliases,
                     )
+                    prof_options.append(prof_item)
+                    all_professions.append(prof_item)
             cat_options.append(
                 CategoryOption(
                     id=cat.id,
                     name=cat.name,
+                    code=str(cat.id),
                     description=cat.description,
                     professions=prof_options,
                 )
             )
 
+        all_professions.sort(key=lambda x: x.name)
+
         return FilterOptionsResponse(
             categories=cat_options,
+            professions=all_professions,
             academic_levels=ACADEMIC_LEVELS,
             departments=COLOMBIAN_DEPARTMENTS,
         )

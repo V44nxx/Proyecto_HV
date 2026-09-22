@@ -20,7 +20,7 @@ These are the building blocks used in every protected route:
 """
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Cookie, Depends, HTTPException, Request, status
@@ -57,15 +57,33 @@ class AuthenticatedUser:
 _redis_pool: Redis | None = None  # type: ignore[type-arg]
 
 
-async def get_redis() -> Redis:  # type: ignore[type-arg]
-    """Provide a Redis client. Creates pool on first call."""
+class _InMemoryRedis:
+    """In-memory fallback for token revocation when Redis is not available locally."""
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+    async def setex(self, key: str, ttl: int, val: str) -> None:
+        self._store[key] = val
+    async def exists(self, key: str) -> int:
+        return 1 if key in self._store else 0
+    async def ping(self) -> bool:
+        return True
+
+
+async def get_redis() -> Any:
+    """Provide a Redis client. Falls back to in-memory store if Redis is offline."""
     global _redis_pool
     if _redis_pool is None:
-        _redis_pool = await from_url(
-            _settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
+        try:
+            client = await from_url(
+                _settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+            await client.ping()
+            _redis_pool = client
+        except Exception:
+            logger.warning("redis_unavailable_using_in_memory_fallback")
+            _redis_pool = _InMemoryRedis()
     return _redis_pool
 
 

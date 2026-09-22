@@ -34,65 +34,152 @@ export class PdfViewer {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.5rem 1rem;
+          padding: 0.5rem 0.85rem;
           background: #1E293B;
           border-bottom: 1px solid #334155;
           color: #F8FAFC;
           font-size: 0.825rem;
           flex-shrink: 0;
           z-index: 10;
+          gap: 0.65rem;
+          overflow-x: auto;
+          scrollbar-width: none;
         ">
-          <!-- Page navigation -->
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <button id="pdf-btn-prev" class="btn btn-outline btn-sm" style="padding: 0.25rem 0.6rem; color: #FFF; border-color: #475569;" title="Página anterior">
+          <!-- Page Navigation Pill (Single Line, Never Wraps) -->
+          <div style="
+            display: inline-flex;
+            align-items: center;
+            background: #0F172A;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            overflow: hidden;
+            white-space: nowrap !important;
+            flex-shrink: 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+          ">
+            <button id="pdf-btn-prev" style="
+              background: transparent;
+              border: none;
+              color: #CBD5E1;
+              padding: 0.35rem 0.55rem;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+              transition: all 150ms ease;
+            " title="Página anterior">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
-            <div style="display: flex; align-items: center; gap: 0.25rem;">
-              <span>Pág.</span>
+
+            <div style="
+              display: inline-flex;
+              align-items: center;
+              padding: 0 0.5rem;
+              gap: 0.35rem;
+              border-left: 1px solid #334155;
+              border-right: 1px solid #334155;
+              font-size: 0.8rem;
+              white-space: nowrap !important;
+            ">
+              <span style="color: #94A3B8; font-size: 0.75rem; font-weight: 500;">Pág.</span>
               <input id="pdf-input-page" type="number" min="1" max="1" value="1" style="
-                width: 44px;
-                padding: 0.2rem 0.35rem;
-                background: #0F172A;
+                width: 36px;
+                padding: 0.15rem 0.2rem;
+                background: #1E293B;
                 border: 1px solid #475569;
-                border-radius: 4px;
-                color: #FFF;
+                border-radius: 3px;
+                color: #38BDF8;
+                font-weight: 700;
                 text-align: center;
                 font-size: 0.8rem;
+                outline: none;
               "/>
-              <span>de <strong id="pdf-total-pages">0</strong></span>
+              <span style="color: #94A3B8; font-size: 0.775rem; white-space: nowrap !important;">
+                de <strong id="pdf-total-pages" style="color: #F8FAFC; font-weight: 600;">1</strong>
+              </span>
             </div>
-            <button id="pdf-btn-next" class="btn btn-outline btn-sm" style="padding: 0.25rem 0.6rem; color: #FFF; border-color: #475569;" title="Página siguiente">
+
+            <button id="pdf-btn-next" style="
+              background: transparent;
+              border: none;
+              color: #CBD5E1;
+              padding: 0.35rem 0.55rem;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+              transition: all 150ms ease;
+            " title="Página siguiente">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
 
-          <!-- Traceability banner / badge -->
+          <!-- Traceability Status Badge (Compact & Sleek) -->
           <div id="pdf-trace-badge" style="
             display: inline-flex;
             align-items: center;
-            gap: 0.35rem;
+            gap: 0.4rem;
             font-size: 0.725rem;
             font-weight: 600;
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-            background: rgba(2, 132, 199, 0.2);
+            padding: 0.25rem 0.65rem;
+            border-radius: 9999px;
+            background: rgba(56, 189, 248, 0.1);
             color: #38BDF8;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-          ">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            white-space: nowrap !important;
+            flex-shrink: 0;
+          " title="Trazabilidad activa: haga clic en cualquier dato para saltar al PDF">
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #38BDF8; box-shadow: 0 0 6px #38BDF8;"></span>
             <span>Trazabilidad Activa</span>
           </div>
 
-          <!-- Zoom controls -->
-          <div style="display: flex; align-items: center; gap: 0.4rem;">
-            <button id="pdf-btn-zoom-out" class="btn btn-outline btn-sm" style="padding: 0.25rem 0.5rem; color: #FFF; border-color: #475569;" title="Reducir zoom">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <!-- Zoom Controls Pill -->
+          <div style="
+            display: inline-flex;
+            align-items: center;
+            background: #0F172A;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            overflow: hidden;
+            white-space: nowrap !important;
+            flex-shrink: 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+          ">
+            <button id="pdf-btn-zoom-out" style="
+              background: transparent;
+              border: none;
+              color: #CBD5E1;
+              padding: 0.35rem 0.5rem;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+            " title="Reducir zoom">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <span id="pdf-zoom-pct" style="min-width: 44px; text-align: center; font-size: 0.75rem; color: #94A3B8;">125%</span>
-            <button id="pdf-btn-zoom-in" class="btn btn-outline btn-sm" style="padding: 0.25rem 0.5rem; color: #FFF; border-color: #475569;" title="Aumentar zoom">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span id="pdf-zoom-pct" style="min-width: 42px; text-align: center; font-size: 0.75rem; font-weight: 600; color: #CBD5E1; font-family: var(--font-mono); padding: 0 0.25rem;">57%</span>
+            <button id="pdf-btn-zoom-in" style="
+              background: transparent;
+              border: none;
+              color: #CBD5E1;
+              padding: 0.35rem 0.5rem;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+            " title="Aumentar zoom">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <button id="pdf-btn-fit" class="btn btn-outline btn-sm" style="padding: 0.25rem 0.5rem; color: #FFF; border-color: #475569; font-size: 0.75rem;" title="Ajustar ancho">
+            <button id="pdf-btn-fit" style="
+              background: rgba(255,255,255,0.04);
+              border: none;
+              border-left: 1px solid #334155;
+              color: #38BDF8;
+              font-size: 0.725rem;
+              font-weight: 600;
+              padding: 0.35rem 0.6rem;
+              cursor: pointer;
+            " title="Ajustar al ancho">
               Ajustar
             </button>
           </div>
@@ -166,11 +253,19 @@ export class PdfViewer {
     });
 
     btnFit?.addEventListener("click", () => {
-      const viewportWidth = this.container.querySelector("#pdf-canvas-container")?.clientWidth || 800;
-      this.currentScale = Math.max(0.6, Math.min(2.0, (viewportWidth - 64) / 600));
+      this.fitToWidth();
+    });
+  }
+
+  public fitToWidth(): void {
+    const canvasContainer = this.container.querySelector("#pdf-canvas-container");
+    const viewportWidth = canvasContainer ? canvasContainer.clientWidth : 500;
+    if (viewportWidth > 100) {
+      // Calculate scale so standard A4 page (600px) fits comfortably with margin
+      this.currentScale = Math.max(0.5, Math.min(1.8, (viewportWidth - 40) / 612));
       this.updateZoomDisplay();
       this.renderCurrentPage();
-    });
+    }
   }
 
   private updateZoomDisplay(): void {
@@ -210,6 +305,13 @@ export class PdfViewer {
       if (inputPage) inputPage.max = this.totalPages.toString();
 
       this.currentPage = 1;
+      // Auto-fit to container width on initial load
+      const canvasContainer = this.container.querySelector("#pdf-canvas-container");
+      const viewportWidth = canvasContainer ? canvasContainer.clientWidth : 500;
+      if (viewportWidth > 100) {
+        this.currentScale = Math.max(0.5, Math.min(1.4, (viewportWidth - 40) / 612));
+        this.updateZoomDisplay();
+      }
       await this.renderCurrentPage();
     } catch (err) {
       console.error("Failed to parse PDF document:", err);

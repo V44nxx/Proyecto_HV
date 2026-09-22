@@ -11,6 +11,7 @@ import structlog
 from app.domain.entities.canonical_resume import (
     CanonicalContact,
     CanonicalEducation,
+    CanonicalExperienceSummary,
     CanonicalLanguage,
     CanonicalPerson,
     CanonicalResume,
@@ -55,6 +56,14 @@ ENGLISH_MONTHS: dict[str, int] = {
     "july": 7, "jul": 7, "august": 8, "aug": 8, "september": 9, "sep": 9,
     "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
 }
+
+COLOMBIAN_DEPARTMENTS: list[str] = [
+    "Amazonas", "Antioquia", "Arauca", "Atlántico", "Bolívar", "Boyacá",
+    "Caldas", "Caquetá", "Casanare", "Cauca", "Cesar", "Chocó", "Córdoba",
+    "Cundinamarca", "Guainía", "Guaviare", "Huila", "La Guajira", "Magdalena",
+    "Meta", "Nariño", "Norte de Santander", "Putumayo", "Quindío", "Risaralda",
+    "San Andrés", "Santander", "Sucre", "Tolima", "Valle del Cauca", "Vaupés", "Vichada", "Bogotá",
+]
 
 
 class AtsResumeExtractor:
@@ -101,6 +110,26 @@ class AtsResumeExtractor:
             sections.get("education", ""), fields
         )
 
+        # If person has a professional card and education doesn't, associate it
+        if person.professional_card_number:
+            for edu in educations:
+                if not edu.professional_card_no:
+                    edu.professional_card_no = person.professional_card_number
+                    break
+
+        # Calculate CanonicalExperienceSummary
+        pub_m = sum(w.total_months for w in work_experiences if w.sector == "PUBLIC")
+        priv_m = sum(w.total_months for w in work_experiences if w.sector != "PUBLIC")
+        tot_m = pub_m + priv_m
+        exp_summary = CanonicalExperienceSummary(
+            public_years=pub_m // 12,
+            public_months=pub_m % 12,
+            private_years=priv_m // 12,
+            private_months=priv_m % 12,
+            total_years=tot_m // 12,
+            total_months=tot_m % 12,
+        )
+
         # 6. Extract Skills
         skills = self._extract_skills(sections.get("skills", ""), full_text)
 
@@ -123,12 +152,15 @@ class AtsResumeExtractor:
         }
         if summary:
             metadata["summary"] = summary
+        if person.headline:
+            metadata["headline"] = person.headline
 
         return CanonicalResume(
             person=person,
             contact=contact,
             educations=educations,
             work_experiences=work_experiences,
+            experience_summary=exp_summary,
             languages=languages,
             extracted_fields=fields,
             metadata=metadata,
@@ -211,15 +243,16 @@ class AtsResumeExtractor:
     ) -> tuple[CanonicalPerson, CanonicalContact]:
         target_text = header_text if header_text else full_text
 
-        # 1. Full name
+        # 1. Full name & Professional Headline
         first_name = None
         middle_name = None
         first_surname = None
         second_surname = None
         full_name = None
+        headline = None
 
         lines = [line.strip() for line in target_text.splitlines() if line.strip()]
-        for line in lines[:6]:
+        for idx, line in enumerate(lines[:6]):
             # Discard obvious non-name lines
             upper = line.upper()
             if any(skip in upper for skip in ["CURRICULUM", "HOJA DE VIDA", "RESUME", "@", "HTTP", "WWW", "TEL", "+"]):
@@ -245,6 +278,13 @@ class AtsResumeExtractor:
                 else:
                     first_name = words[0]
                     first_surname = words[-1]
+
+                # Check if the subsequent line is a professional title/headline
+                if idx + 1 < len(lines):
+                    next_line = lines[idx + 1].strip()
+                    next_upper = next_line.upper()
+                    if not any(skip in next_upper for skip in ["@", "HTTP", "WWW", "TEL", "+", "C.C.", "CEDULA", "CEL."]) and not re.search(r"\d{3,}", next_line):
+                        headline = next_line
                 break
 
         if full_name:
@@ -254,15 +294,16 @@ class AtsResumeExtractor:
                     raw_value=full_name,
                     normalized_value=full_name,
                     page_number=1,
-                    confidence=0.90,
+                    confidence=0.95,
                 )
             )
 
-        # 2. Identification number (if present)
+        # 2. Identification number and place (C.C. / C.E. / DNI)
         id_type = None
         id_num = None
+        id_place = None
         m_id = re.search(
-            r"(?:C\.?C\.?|C[EÉ]|DNI|PASAPORTE|CEDULA|IDENTIFICACI[OÓ]N|ID)[:\s#]*([0-9\.\-]+)",
+            r"(?:C\.?C\.?|C[EÉ]|DNI|PASAPORTE|CEDULA|IDENTIFICACI[OÓ]N|ID)[:\s#]*([0-9\.\-]+)(?:\s+de\s+([A-Za-zÁÉÍÓÚáéíóúñÑ]+))?",
             full_text,
             re.IGNORECASE,
         )
@@ -272,16 +313,61 @@ class AtsResumeExtractor:
             if len(clean_id) >= 6:
                 id_type = "CC"
                 id_num = clean_id
+                if m_id.group(2):
+                    id_place = m_id.group(2).strip()
                 fields.append(
                     ExtractedFieldItem(
                         field_name="identification_number",
                         raw_value=raw_id,
                         normalized_value=clean_id,
                         page_number=1,
+                        confidence=0.98,
                     )
                 )
 
-        # 3. Email
+        # 3. Professional Card (Tarjeta Profesional / Matrícula)
+        prof_card = None
+        m_tp = re.search(
+            r"(?:T\.?P\.?|Tarjeta\s+Profesional|Matr[ií]cula(?:\s+Profesional)?)[:\s#]*([A-Za-z0-9\-\s\(\)\.]+?)(?:\s*\||\s*$|\s*\n)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if m_tp:
+            prof_card = m_tp.group(1).strip(" |.,")
+            if len(prof_card) >= 3:
+                fields.append(
+                    ExtractedFieldItem(
+                        field_name="professional_card_number",
+                        raw_value=m_tp.group(0).strip(),
+                        normalized_value=prof_card,
+                        page_number=1,
+                        confidence=0.95,
+                    )
+                )
+
+        # 4. Birth Date (Fecha de Nacimiento)
+        birth_date = None
+        m_birth = re.search(
+            r"(?:Nacimiento|Fecha\s+(?:de\s+)?nacimiento|Nacido\s+(?:el\s+)?|F\.?\s*Nac(?:imiento)?)[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+            full_text,
+            re.IGNORECASE,
+        )
+        if m_birth:
+            raw_bdate = m_birth.group(1).strip()
+            parsed_bdate = self._parse_flexible_date(raw_bdate)
+            if parsed_bdate:
+                birth_date = parsed_bdate
+                fields.append(
+                    ExtractedFieldItem(
+                        field_name="birth_date",
+                        raw_value=raw_bdate,
+                        normalized_value=parsed_bdate.isoformat(),
+                        page_number=1,
+                        confidence=0.98,
+                    )
+                )
+
+        # 5. Email
         email = None
         m_email = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", full_text)
         if m_email:
@@ -292,38 +378,66 @@ class AtsResumeExtractor:
                     raw_value=m_email.group(0),
                     normalized_value=email,
                     page_number=1,
+                    confidence=0.99,
                 )
             )
 
-        # 4. Telephone / Mobile
+        # 6. Telephone / Mobile
         phone = None
-        m_phone = re.search(
-            r"(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}",
-            target_text,
-        )
-        if m_phone:
-            raw_ph = m_phone.group(0).strip()
-            if len(re.sub(r"[^\d]", "", raw_ph)) >= 7:
-                phone = raw_ph
-                fields.append(
-                    ExtractedFieldItem(
-                        field_name="telephone",
-                        raw_value=raw_ph,
-                        normalized_value=phone,
-                        page_number=1,
-                    )
+        mobile_phone = None
+        phone_matches = re.findall(r"(?:(?:\+?57[\s.-]?)?3\d{2}[\s.-]?\d{3}[\s.-]?\d{4}|\b\d{7,10}\b)", target_text)
+        if phone_matches:
+            mobile_phone = phone_matches[0].strip()
+            phone = phone_matches[1].strip() if len(phone_matches) > 1 else mobile_phone
+            fields.append(
+                ExtractedFieldItem(
+                    field_name="mobile_phone",
+                    raw_value=phone_matches[0],
+                    normalized_value=mobile_phone,
+                    page_number=1,
+                    confidence=0.95,
                 )
+            )
 
-        # 5. Location (City, Country / Department)
+        # 7. Location (City, Department, Country)
         city = None
-        country = None
-        m_loc = re.search(
-            r"(?:UBICACI[OÓ]N|LOCATION|DIRECCI[OÓ]N|ADDRESS)?[:\s]*([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+)?),\s*([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+)?)",
-            target_text,
-        )
-        if m_loc:
-            city = m_loc.group(1).strip()
-            country = m_loc.group(2).strip()
+        department = None
+        country = "Colombia"
+
+        # Split target lines by pipe or newline to isolate clean location segments
+        tokens: list[str] = []
+        for l in target_text.splitlines():
+            for p in l.split("|"):
+                tokens.append(p.strip())
+
+        for token in tokens:
+            m_loc = re.search(
+                r"^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+),\s*([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)(?:\s*\(([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+)\))?$",
+                token,
+            )
+            if m_loc:
+                cand_city = m_loc.group(1).strip()
+                cand_dept = m_loc.group(2).strip()
+                cand_country = m_loc.group(3).strip() if m_loc.group(3) else None
+
+                # Verify if cand_dept matches Colombian department
+                matched_d = next(
+                    (d for d in COLOMBIAN_DEPARTMENTS if d.lower() == cand_dept.lower() or d.lower() in cand_dept.lower()),
+                    None,
+                )
+                if matched_d:
+                    city = cand_city
+                    department = matched_d
+                    if cand_country:
+                        country = cand_country
+                    break
+                elif "colombia" in cand_dept.lower():
+                    city = cand_city
+                    country = "Colombia"
+                    break
+
+        if not city and id_place:
+            city = id_place
 
         person = CanonicalPerson(
             identification_type=id_type,
@@ -332,14 +446,22 @@ class AtsResumeExtractor:
             second_surname=second_surname,
             first_name=first_name,
             middle_name=middle_name,
+            birth_date=birth_date,
+            birth_country=country if birth_date else None,
+            birth_department=department if birth_date else None,
+            birth_municipality=id_place or city,
+            military_card_number=prof_card,
+            professional_card_number=prof_card,
+            headline=headline,
         )
 
         contact = CanonicalContact(
             address=None,
             country=country,
+            department=department,
             municipality=city,
             telephone=phone,
-            mobile_phone=phone,
+            mobile_phone=mobile_phone or phone,
             email=email,
         )
 
@@ -367,12 +489,15 @@ class AtsResumeExtractor:
 
         experiences: list[CanonicalWorkExperience] = []
 
-        # Date range pattern matching:
-        # e.g., "Ene 2020 - Dic 2022", "March 2019 - Present", "2018 - 2021", "01/2019 - 12/2021"
+        month_word = r"(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|set(?:iembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
         date_range_pattern = re.compile(
-            r"(?P<start>(?:[A-Za-z]{3,10}\.?\s+)?(?:\d{1,2}[/-])?\d{4})"
+            rf"(?P<start>(?:{month_word}\.?\s+)?(?:\d{{1,2}}[/-])?\d{{4}})"
             r"\s*(?:-|–|—|al?|to)\s*"
-            r"(?P<end>(?:[A-Za-z]{3,10}\.?\s+)?(?:\d{1,2}[/-])?\d{4}|Presente|Actualidad|Present|Current)",
+            rf"(?P<end>(?:{month_word}\.?\s+)?(?:\d{{1,2}}[/-])?\d{{4}}|Presente|Actualidad|Present|Current)",
+            re.IGNORECASE,
+        )
+        single_year_pattern = re.compile(
+            rf"(?P<start>(?:{month_word}\.?\s+)?(?:\d{{1,2}}[/-])?(?:19\d{{2}}|20\d{{2}}))(?:\s*$|\s*[•·|])",
             re.IGNORECASE,
         )
 
@@ -380,12 +505,18 @@ class AtsResumeExtractor:
         if not lines:
             return []
 
-        # Find all lines containing a date range
-        date_indices: list[tuple[int, re.Match]] = []
+        # Find all lines containing a date range or year
+        date_indices: list[tuple[int, Any, bool]] = []
         for idx, line in enumerate(lines):
             m = date_range_pattern.search(line)
             if m:
-                date_indices.append((idx, m))
+                date_indices.append((idx, m, False))
+            else:
+                # Check for single year only if not bullet
+                if not line.startswith(("-", "•", "*", "–")):
+                    m_single = single_year_pattern.search(line)
+                    if m_single:
+                        date_indices.append((idx, m_single, True))
 
         if not date_indices:
             return []
@@ -402,7 +533,7 @@ class AtsResumeExtractor:
             u = candidate.upper()
             return any(ind in u for ind in role_indicators)
 
-        for i, (date_line_idx, m_date) in enumerate(date_indices):
+        for i, (date_line_idx, m_date, is_single_date) in enumerate(date_indices):
             prev_date_idx = date_indices[i - 1][0] if i > 0 else -1
             next_date_idx = date_indices[i + 1][0] if i + 1 < len(date_indices) else len(lines)
 
@@ -416,21 +547,22 @@ class AtsResumeExtractor:
                 if len(header_lines) >= 2:
                     break
 
-            if not header_lines and candidate_headers:
-                header_lines = [candidate_headers[-1]]
-
             # Also check if title or company was inline on the date line
             inline_text = lines[date_line_idx][: m_date.start()].strip()
             if inline_text:
                 header_lines.append(inline_text)
 
             start_str = m_date.group("start").strip()
-            end_str = m_date.group("end").strip()
+            if is_single_date:
+                end_str = start_str
+                is_current = False
+            else:
+                end_str = m_date.group("end").strip()
+                is_current = any(
+                    curr in end_str.upper() for curr in ["PRESENTE", "ACTUALIDAD", "PRESENT", "CURRENT"]
+                )
 
             start_date = self._parse_flexible_date(start_str)
-            is_current = any(
-                curr in end_str.upper() for curr in ["PRESENTE", "ACTUALIDAD", "PRESENT", "CURRENT"]
-            )
             end_date = None if is_current else self._parse_flexible_date(end_str)
 
             # Look for Company and Position in header_lines
@@ -515,6 +647,18 @@ class AtsResumeExtractor:
                     )
                 )
 
+            # Calculate duration in months
+            tot_months = 0
+            if start_date:
+                effective_end = date.today() if is_current else (end_date or date.today())
+                if effective_end >= start_date:
+                    diff_years = effective_end.year - start_date.year
+                    diff_months = effective_end.month - start_date.month
+                    tot_months = diff_years * 12 + diff_months
+                    if tot_months == 0 and effective_end.year == start_date.year:
+                        tot_months = 12
+                    tot_months = max(1, tot_months)
+
             experiences.append(
                 CanonicalWorkExperience(
                     company_name=company,
@@ -525,6 +669,7 @@ class AtsResumeExtractor:
                     is_current=is_current,
                     responsibilities=responsibilities,
                     source_page=1,
+                    total_months=tot_months,
                 )
             )
 
@@ -749,19 +894,18 @@ class AtsResumeExtractor:
             if 1 <= mth <= 12:
                 return date(y, mth, 1)
 
-        # Format: "Ene 2020", "March 2019"
-        words = clean.split()
-        if len(words) == 2:
-            mth_str, y_str = words[0].lower().rstrip("."), words[1]
-            if y_str.isdigit() and len(y_str) == 4:
-                year = int(y_str)
-                month = SPANISH_MONTHS.get(mth_str) or ENGLISH_MONTHS.get(mth_str)
-                if month:
-                    return date(year, month, 1)
-
-        # Year only: "2018"
-        m = re.match(r"^(\d{4})$", clean)
-        if m:
-            return date(int(m.group(1)), 1, 1)
+        # Format: Year with optional month name or prefix e.g. "Ene 2020", "Florencia 2024", "2018"
+        m_year = re.search(r"\b(19\d{2}|20\d{2})\b", clean)
+        if m_year:
+            year = int(m_year.group(1))
+            prefix = clean[: m_year.start()].strip().lower()
+            words_pre = prefix.split()
+            month = 1
+            if words_pre:
+                last_word = words_pre[-1].rstrip(".")
+                matched_m = SPANISH_MONTHS.get(last_word) or ENGLISH_MONTHS.get(last_word)
+                if matched_m:
+                    month = matched_m
+            return date(year, month, 1)
 
         return None

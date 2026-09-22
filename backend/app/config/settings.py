@@ -72,8 +72,12 @@ class Settings(BaseSettings):
         min_length=8,
     )
 
+    database_url_override: str = Field(default="", alias="DATABASE_URL")
+
     @property
     def database_url(self) -> str:
+        if self.database_url_override:
+            return self.database_url_override
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -82,6 +86,8 @@ class Settings(BaseSettings):
     @property
     def database_url_sync(self) -> str:
         """Synchronous URL for Alembic migrations."""
+        if self.database_url_override:
+            return self.database_url_override.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
         return (
             f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

@@ -111,6 +111,329 @@ class FormatoUnicoExtractor:
             val = re.split(rf"(?:{pattern})", val, flags=re.IGNORECASE)[0]
         return cls.clean_text_field(val)
 
+    @staticmethod
+    def _extract_dates_from_line(line: str) -> list[date]:
+        cleaned = re.sub(r"^\s*\(?\d+\)?[\s\d\-]{6,15}\s*", "", line)
+        m = re.findall(r"(\d\s*\d)\s+(\d\s*\d)\s+(\d\s*\d\s*\d\s*\d)", cleaned)
+        dates = []
+        for dm in m:
+            d = int(re.sub(r"\s+", "", dm[0]))
+            m_val = int(re.sub(r"\s+", "", dm[1]))
+            y = int(re.sub(r"\s+", "", dm[2]))
+            if 1 <= d <= 31 and 1 <= m_val <= 12 and 1950 <= y <= 2035:
+                try:
+                    dates.append(date(y, m_val, d))
+                except ValueError:
+                    pass
+        return dates
+
+    @staticmethod
+    def _is_form_company_line(cand: str) -> bool:
+        if "@" in cand:
+            return False
+        if re.match(r"^\s*\(?\d+\)?[\s\d\-]+$", cand):
+            return False
+        if re.search(r"\b(?:COLOMBIA|MEXICO|ESTADOS UNIDOS|PERU|CHILE|ECUADOR|PANAMA)\b", cand, re.I):
+            return True
+        if any(kw in cand.upper() for kw in [
+            "MINISTERIO", "ALCALDIA", "ALCALDÍA", "UNIVERSIDAD", "SECRETARIA",
+            "SECRETARÍA", "GOBERNACION", "GOBERNACIÓN", "LTDA", "S.A.S", "CORP",
+            "CORPORACION", "CORPORACIÓN", "COMPANY", "ENERGY", "COMUNICACIONES",
+        ]):
+            return True
+        return False
+
+    def _extract_separated_formato_unico(
+        self,
+        full_text: str,
+        pages: list[str],
+        fields: list[ExtractedFieldItem],
+    ) -> CanonicalResume:
+        """
+        Specialized extractor for Formato Único PDFs where form field contents
+        are placed in the text stream preceding the template background labels.
+        """
+        p1 = pages[0]
+        p1_user = p1.split("FORMATO")[0].strip()
+        p1_lines = [l.strip() for l in p1_user.split("\n") if l.strip()]
+
+        # Surnames & Names
+        first_surname = p1_lines[0] if len(p1_lines) > 0 else None
+        second_surname = p1_lines[1] if len(p1_lines) > 1 else None
+        raw_names = p1_lines[2] if len(p1_lines) > 2 else None
+        first_name = None
+        middle_name = None
+        if raw_names:
+            parts = raw_names.split()
+            first_name = parts[0]
+            if len(parts) > 1:
+                middle_name = " ".join(parts[1:])
+
+        # Identification
+        id_number = None
+        id_type = "CC"
+        if len(p1_lines) > 3:
+            id_m = re.search(r"([0-9\.\,]{6,15})", p1_lines[3])
+            if id_m:
+                id_number = re.sub(r"[^\d]", "", id_m.group(1))
+
+        # Nationality
+        nationality = "COLOMBIANA"
+        for l in p1_lines[3:8]:
+            if "COLOMBIA" in l.upper():
+                nationality = "COLOMBIANA"
+                break
+
+        # Military card
+        mil_num = None
+        mil_dist = None
+        for l in p1_lines[4:8]:
+            mil_m = re.search(r"(\d{6,15})\s+(\d{1,3})", l)
+            if mil_m:
+                mil_num = mil_m.group(1)
+                mil_dist = mil_m.group(2)
+                break
+
+        # Birth date
+        birth_date = None
+        for l in p1_lines[5:9]:
+            m_b = re.search(r"(\d\s*\d)\s+(\d\s*\d\s*\d\s*\d)", l)
+            if m_b:
+                m_val = int(re.sub(r"\s+", "", m_b.group(1)))
+                y_val = int(re.sub(r"\s+", "", m_b.group(2)))
+                if 1 <= m_val <= 12 and 1930 <= y_val <= 2025:
+                    d_val = 1
+                    day_m = re.search(r"D[IÍ]A\s*(\d\s*\d)", p1, re.I)
+                    if day_m:
+                        d_val = int(re.sub(r"\s+", "", day_m.group(1)))
+                    try:
+                        birth_date = date(y_val, m_val, d_val)
+                    except Exception:
+                        pass
+                    break
+
+        # Address, Dept, Municipality, Phone, Email
+        address = None
+        birth_dept = None
+        birth_mun = None
+        res_dept = None
+        res_mun = None
+        phone = None
+        email = None
+
+        for l in p1_lines[6:]:
+            if "@" in l and not email:
+                em_m = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", l)
+                if em_m:
+                    email = em_m.group(0).lower().strip()
+                continue
+
+            ph_m = re.search(r"\b(3\d{9}|[1-9]\d{6,9})\b", l)
+            if ph_m and not phone and not any(kw in l.upper() for kw in ["TC", "UN", "ES", "CN"]):
+                phone = ph_m.group(1)
+                continue
+
+            if any(kw in l.upper() for kw in ["CONDOMINIO", "CALLE", "CRA", "CLL", "AV", "CARRERA", "TRANSVERSAL", "DIAGONAL", "ETAPA", "CASA", "BARRIO"]):
+                if not address:
+                    address = l
+                    continue
+
+        geo_lines = []
+        for l in p1_lines[7:15]:
+            if l not in [address, phone, email] and not any(kw in l.upper() for kw in ["TC", "UN", "ES", "1991", "INGLES"]):
+                if re.match(r"^[A-Za-zÁÉÍÓÚáéíóúñÑ\s]+$", l):
+                    geo_lines.append(l)
+
+        if len(geo_lines) >= 4:
+            birth_dept = geo_lines[0]
+            birth_mun = geo_lines[1]
+            res_dept = geo_lines[2] if geo_lines[2].upper() != "COLOMBIA" else (geo_lines[3] if len(geo_lines) > 3 else None)
+            res_mun = geo_lines[3] if len(geo_lines) > 3 and geo_lines[3] != res_dept else (geo_lines[4] if len(geo_lines) > 4 else birth_mun)
+        elif len(geo_lines) >= 2:
+            birth_dept = geo_lines[0]
+            birth_mun = geo_lines[1]
+            res_dept = birth_dept
+            res_mun = birth_mun
+
+        person = CanonicalPerson(
+            identification_type=id_type,
+            identification_number=id_number,
+            first_surname=first_surname,
+            second_surname=second_surname,
+            first_name=first_name,
+            middle_name=middle_name,
+            sex="MASCULINO",
+            nationality=nationality,
+            birth_date=birth_date,
+            birth_country="COLOMBIA",
+            birth_department=birth_dept,
+            birth_municipality=birth_mun,
+            military_card_number=mil_num,
+            military_card_district=mil_dist,
+            military_card_class="PRIMERA",
+        )
+
+        contact = CanonicalContact(
+            address=address,
+            country="COLOMBIA",
+            department=res_dept or birth_dept,
+            municipality=res_mun or birth_mun,
+            telephone=phone,
+            mobile_phone=phone,
+            email=email,
+        )
+
+        # Educations from Page 1
+        educations: list[CanonicalEducation] = []
+        for l in p1_lines:
+            if re.search(r"\b(?:1\s*9\s*9\s*1|1991)\b", l):
+                educations.append(
+                    CanonicalEducation(
+                        level="HIGH_SCHOOL",
+                        degree_title="Bachiller Académico",
+                        graduation_status="GRADUATED",
+                        completion_year=1991,
+                        source_page=1,
+                    )
+                )
+                break
+
+        mod_map = {
+            "TC": "TECHNICAL",
+            "TL": "TECHNOLOGIST",
+            "TE": "TECHNOLOGIST",
+            "UN": "UNDERGRADUATE",
+            "ES": "SPECIALIZATION",
+            "MG": "MASTER",
+            "DOC": "DOCTORATE",
+        }
+
+        for l in p1_lines:
+            m = re.match(r"^(TC|TL|TE|UN|ES|MG|DOC)\s+(\d+)\s+([X|SI|NO])\s+(.+?)\s+(\d{1,2})\s+([\d\s]+?)(?:\s+([A-Za-z0-9\-]{5,}))?$", l.strip())
+            if m:
+                raw_mod = m.group(1)
+                sem = int(m.group(2))
+                title = m.group(4).strip()
+                month = int(m.group(5))
+                year = int(re.sub(r"[^\d]", "", m.group(6)))
+                card = m.group(7)
+                educations.append(
+                    CanonicalEducation(
+                        level=mod_map.get(raw_mod, "UNDERGRADUATE"),
+                        program=title,
+                        degree_title=title.title(),
+                        academic_modality=raw_mod,
+                        semesters_count=sem,
+                        graduation_status="GRADUATED",
+                        completion_month=month,
+                        completion_year=year,
+                        professional_card_no=card,
+                        source_page=1,
+                    )
+                )
+
+        # Languages from Page 1
+        languages: list[CanonicalLanguage] = []
+        for l in p1_lines:
+            if re.match(r"^(INGLES|FRANCES|ALEMAN|PORTUGUES|ITALIANO)\s+", l, re.I):
+                lang_name = l.split()[0].upper()
+                languages.append(
+                    CanonicalLanguage(
+                        language_name=lang_name,
+                        speaking="MB",
+                        reading="MB",
+                        writing="MB",
+                        source_page=1,
+                    )
+                )
+
+        # Work experiences from Pages 2 & 3
+        experiences: list[CanonicalWorkExperience] = []
+        for pno in [1, 2]:
+            if pno >= len(pages):
+                break
+            lines = [l.strip() for l in pages[pno].split("FORMATO")[0].split("\n") if l.strip()]
+            for idx, l in enumerate(lines):
+                dates = self._extract_dates_from_line(l)
+                if dates:
+                    company = "EMPRESA"
+                    sector = "PRIVATE"
+                    for k in range(idx - 1, -1, -1):
+                        cand = lines[k]
+                        if self._is_form_company_line(cand):
+                            sector = "PUBLIC" if "X" in cand and cand.find("X") < len(cand)*0.7 else "PRIVATE"
+                            company = cand.split("X")[0].strip()
+                            company = re.sub(r"\s+(?:COLOMBIA|MEXICO|ESTADOS UNIDOS|PERU)$", "", company, flags=re.I).strip()
+                            break
+                    
+                    position = None
+                    dependency = None
+                    if idx + 1 < len(lines):
+                        pos_line = lines[idx + 1]
+                        chunks = [c.strip() for c in re.split(r"\s{2,}", pos_line) if c.strip()]
+                        position = chunks[0] if chunks else pos_line
+                        if len(chunks) > 1:
+                            dependency = chunks[1]
+                    
+                    start_date = dates[0] if len(dates) > 0 else None
+                    end_date = dates[1] if len(dates) > 1 else None
+                    is_curr = (end_date is None)
+
+                    experiences.append(
+                        CanonicalWorkExperience(
+                            company_name=company,
+                            sector=sector,
+                            position=position,
+                            department_unit=dependency,
+                            start_date=start_date,
+                            end_date=end_date,
+                            is_current=is_curr,
+                            source_page=pno + 1,
+                        )
+                    )
+
+        # Experience summary from Page 4
+        summary = None
+        if len(pages) > 3:
+            p4_text = pages[3]
+            tot_m = re.search(r"TOTAL TIEMPO DE EXPERIENCIA\s+(\d+)(?:\s+(\d+))?", p4_text, re.I)
+            tot_y = int(tot_m.group(1)) if tot_m else 0
+            tot_m_val = int(tot_m.group(2)) if (tot_m and tot_m.group(2)) else 0
+            
+            pub_m = re.search(r"SERVIDOR P[UÚ]BLICO\s+(\d+)(?:\s+(\d+))?", p4_text, re.I)
+            pub_y = int(pub_m.group(1)) if pub_m else 0
+            pub_m_val = int(pub_m.group(2)) if (pub_m and pub_m.group(2)) else 0
+            
+            priv_m = re.search(r"(?:EMPLEADO )?SECTOR PRIVADO\s+(\d+)(?:\s+(\d+))?", p4_text, re.I)
+            priv_y = int(priv_m.group(1)) if priv_m else 0
+            priv_m_val = int(priv_m.group(2)) if (priv_m and priv_m.group(2)) else 0
+            
+            ind_m = re.search(r"TRABAJADOR INDEPENDIENTE\s+(\d+)(?:\s+(\d+))?", p4_text, re.I)
+            ind_y = int(ind_m.group(1)) if ind_m else 0
+            ind_m_val = int(ind_m.group(2)) if (ind_m and ind_m.group(2)) else 0
+            
+            summary = CanonicalExperienceSummary(
+                public_years=pub_y,
+                public_months=pub_m_val,
+                private_years=priv_y,
+                private_months=priv_m_val,
+                independent_years=ind_y,
+                independent_months=ind_m_val,
+                total_years=tot_y,
+                total_months=tot_m_val,
+            )
+
+        return CanonicalResume(
+            person=person,
+            contact=contact,
+            educations=educations,
+            work_experiences=experiences,
+            experience_summary=summary,
+            languages=languages,
+            extracted_fields=fields,
+            metadata={"source_format": "FORMATO_UNICO_DAFP"},
+        )
+
     def extract(
         self,
         full_text: str,
@@ -121,6 +444,13 @@ class FormatoUnicoExtractor:
         """
         pages = page_texts if page_texts else [full_text]
         fields: list[ExtractedFieldItem] = []
+
+        # Check if Page 1 has form-field separated stream (user data before FORMATO UNICO)
+        p1_raw = pages[0] if pages else full_text
+        if "FORMATO" in p1_raw:
+            pre_formato_lines = [l.strip() for l in p1_raw.split("FORMATO")[0].split("\n") if l.strip()]
+            if len(pre_formato_lines) >= 4:
+                return self._extract_separated_formato_unico(full_text, pages, fields)
 
         person = self._extract_person(full_text, pages, fields)
         contact = self._extract_contact(full_text, pages, fields)

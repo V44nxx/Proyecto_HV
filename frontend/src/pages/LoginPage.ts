@@ -64,8 +64,8 @@ export function renderLoginPage(container: HTMLElement): void {
               type="email" 
               class="form-control" 
               required 
-              placeholder="ejemplo@funcionpublica.gov.co" 
-              value="admin@proyecto-hv.local"
+              placeholder="admin@proyectohv.com" 
+              value="admin@proyectohv.com"
               style="width: 100%; padding: 0.7rem 0.85rem; background: #0B1120; border: 1px solid var(--border-subtle); color: #FFF; border-radius: var(--radius-sm);"
             />
           </div>

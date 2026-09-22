@@ -3,24 +3,44 @@ import { authStore, UserProfile } from "../store/authStore";
 
 export interface LoginResponse {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string;
   token_type: string;
-  expires_in: number;
+  expires_at?: string;
+  user?: {
+    id: string;
+    email: string;
+    full_name: string;
+    role: string;
+  };
 }
 
 export const authService = {
   async login(username: string, password: string): Promise<UserProfile> {
-    const formData = new FormData();
-    formData.append("username", username);
-    formData.append("password", password);
-
-    const tokenData = await api.post<LoginResponse>("/auth/login", formData);
+    const tokenData = await api.post<LoginResponse>("/auth/login", {
+      email: username,
+      password: password,
+    });
     authStore.setTokens(tokenData.access_token, tokenData.refresh_token);
 
     // Fetch user profile after authentication
-    const user = await this.getCurrentUser();
-    authStore.setUser(user);
-    return user;
+    try {
+      const user = await this.getCurrentUser();
+      authStore.setUser(user);
+      return user;
+    } catch {
+      if (tokenData.user) {
+        const user: UserProfile = {
+          id: tokenData.user.id,
+          email: tokenData.user.email,
+          fullName: tokenData.user.full_name,
+          role: tokenData.user.role,
+          permissions: [],
+        };
+        authStore.setUser(user);
+        return user;
+      }
+      throw new Error("No se pudo cargar el perfil del usuario");
+    }
   },
 
   async getCurrentUser(): Promise<UserProfile> {

@@ -15,17 +15,25 @@ class CandidateSummaryItem(BaseModel):
     id: uuid.UUID
     identification_type: str | None = None
     identification_number: str | None = None
+    first_name: str | None = None
+    middle_name: str | None = None
+    first_surname: str | None = None
+    second_surname: str | None = None
     full_name: str
     primary_profession: str | None = None
+    profession_name: str | None = None
     primary_category: str | None = None
+    category_name: str | None = None
     email: str | None = None
     telephone: str | None = None
     municipality: str | None = None
     department: str | None = None
     total_experience_years: int = 0
     top_education: str | None = None
+    highest_academic_level: str | None = None
     skills: list[str] = Field(default_factory=list)
     documents_count: int = 0
+    document_count: int = 0
     created_at: datetime
 
 
@@ -46,6 +54,7 @@ class ProfessionOption(BaseModel):
 
     id: uuid.UUID
     name: str
+    category_id: uuid.UUID | None = None
     aliases: list[str] | None = None
 
 
@@ -55,6 +64,7 @@ class CategoryOption(BaseModel):
 
     id: uuid.UUID
     name: str
+    code: str | None = None
     description: str | None = None
     professions: list[ProfessionOption] = Field(default_factory=list)
 
@@ -62,6 +72,7 @@ class CategoryOption(BaseModel):
 class FilterOptionsResponse(BaseModel):
     """Available options for frontend filter selectors."""
     categories: list[CategoryOption]
+    professions: list[ProfessionOption] = Field(default_factory=list)
     academic_levels: list[str]
     departments: list[str]
 
@@ -95,7 +106,9 @@ class CandidateFullDetailResponse(BaseModel):
     birth_municipality: str | None = None
     military_card_number: str | None = None
     primary_profession: str | None = None
+    profession_name: str | None = None
     primary_category: str | None = None
+    category_name: str | None = None
 
     # Relational entities
     contact: dict[str, Any] | None = None

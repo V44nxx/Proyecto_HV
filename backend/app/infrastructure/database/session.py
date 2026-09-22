@@ -15,18 +15,45 @@ from app.config.settings import get_settings
 
 _settings = get_settings()
 
-# ---- Engine ----
-# pool_pre_ping: detect stale connections before use
-# pool_size / max_overflow: tuned for VPS (adjust in production)
-engine: AsyncEngine = create_async_engine(
-    _settings.database_url,
-    echo=_settings.debug,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800,  # Recycle connections every 30 minutes
-)
+if "sqlite" in _settings.database_url:
+    import json
+    import sqlite3
+    from sqlalchemy.dialects.postgresql import INET, JSONB
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.types import ARRAY
+
+    try:
+        sqlite3.register_adapter(list, json.dumps)
+    except Exception:
+        pass
+
+    @compiles(ARRAY, "sqlite")
+    def _compile_array_sqlite(type_, compiler, **kw):
+        return "TEXT"
+
+    @compiles(JSONB, "sqlite")
+    def _compile_jsonb_sqlite(type_, compiler, **kw):
+        return "JSON"
+
+    @compiles(INET, "sqlite")
+    def _compile_inet_sqlite(type_, compiler, **kw):
+        return "VARCHAR(45)"
+
+    engine: AsyncEngine = create_async_engine(
+        _settings.database_url,
+        echo=_settings.debug,
+        connect_args={"check_same_thread": False},
+    )
+else:
+    engine: AsyncEngine = create_async_engine(
+        _settings.database_url,
+        echo=_settings.debug,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
 
 # ---- Session factory ----
 AsyncSessionFactory = async_sessionmaker(

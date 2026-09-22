@@ -60,6 +60,16 @@ export async function renderSearchPage(container: HTMLElement): Promise<void> {
             </select>
           </div>
 
+          <!-- Profession Filter -->
+          <div class="form-group" style="margin-bottom: 1.1rem;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.35rem; display: block;">
+              Profesión
+            </label>
+            <select id="facet-profession" class="form-control" style="width: 100%; padding: 0.45rem 0.65rem; font-size: 0.825rem; background: #0B1120; border: 1px solid var(--border-subtle); color: #FFF; border-radius: var(--radius-sm);">
+              <option value="">Todas las profesiones</option>
+            </select>
+          </div>
+
           <!-- Academic Level Filter -->
           <div class="form-group" style="margin-bottom: 1.1rem;">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.35rem; display: block;">
@@ -142,8 +152,32 @@ export async function renderSearchPage(container: HTMLElement): Promise<void> {
   let currentPage = 1;
   const pageSize = 12;
 
+  // Cached taxonomy for cascading dropdowns
+  let allProfessionsList: Array<{ id: string; name: string; category_id?: string }> = [];
+
+  const updateProfessionOptions = (selectedCatId?: string) => {
+    const profSelect = container.querySelector("#facet-profession") as HTMLSelectElement;
+    if (!profSelect) return;
+    const currentVal = profSelect.value;
+    profSelect.innerHTML = `<option value="">Todas las profesiones</option>`;
+    const filtered = selectedCatId
+      ? allProfessionsList.filter((p) => p.category_id === selectedCatId)
+      : allProfessionsList;
+
+    filtered.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      if (p.id === currentVal) opt.selected = true;
+      profSelect.appendChild(opt);
+    });
+  };
+
   // Load Filter Options
-  await loadFilterOptions(container);
+  await loadFilterOptions(container, (profs) => {
+    allProfessionsList = profs;
+    updateProfessionOptions();
+  });
 
   // Setup Event Handlers
   const queryInput = container.querySelector("#search-query") as HTMLInputElement;
@@ -151,6 +185,8 @@ export async function renderSearchPage(container: HTMLElement): Promise<void> {
   const btnReset = container.querySelector("#btn-search-reset");
   const btnFilterApply = container.querySelector("#btn-filter-apply");
   const sortSelect = container.querySelector("#sort-select") as HTMLSelectElement;
+  const catSelect = container.querySelector("#facet-category") as HTMLSelectElement;
+  const profSelect = container.querySelector("#facet-profession") as HTMLSelectElement;
 
   const triggerSearch = () => {
     currentPage = 1;
@@ -164,9 +200,26 @@ export async function renderSearchPage(container: HTMLElement): Promise<void> {
   btnFilterApply?.addEventListener("click", triggerSearch);
   sortSelect?.addEventListener("change", triggerSearch);
 
+  catSelect?.addEventListener("change", () => {
+    updateProfessionOptions(catSelect.value);
+    triggerSearch();
+  });
+
+  profSelect?.addEventListener("change", () => {
+    if (profSelect.value) {
+      const matched = allProfessionsList.find((p) => p.id === profSelect.value);
+      if (matched && matched.category_id && !catSelect.value) {
+        catSelect.value = matched.category_id;
+      }
+    }
+    triggerSearch();
+  });
+
   btnReset?.addEventListener("click", () => {
     queryInput.value = "";
-    (container.querySelector("#facet-category") as HTMLSelectElement).value = "";
+    if (catSelect) catSelect.value = "";
+    updateProfessionOptions("");
+    if (profSelect) profSelect.value = "";
     (container.querySelector("#facet-level") as HTMLSelectElement).value = "";
     (container.querySelector("#facet-department") as HTMLSelectElement).value = "";
     (container.querySelector("#facet-min-exp") as HTMLInputElement).value = "";
@@ -186,7 +239,10 @@ export async function renderSearchPage(container: HTMLElement): Promise<void> {
   await executeSearch(container, currentPage, pageSize);
 }
 
-async function loadFilterOptions(container: HTMLElement): Promise<void> {
+async function loadFilterOptions(
+  container: HTMLElement,
+  onProfessionsLoaded?: (profs: Array<{ id: string; name: string; category_id?: string }>) => void
+): Promise<void> {
   try {
     const opts: FilterOptionsResponse = await searchService.getFilterOptions();
     const catSelect = container.querySelector("#facet-category") as HTMLSelectElement;
@@ -202,11 +258,24 @@ async function loadFilterOptions(container: HTMLElement): Promise<void> {
       });
     }
 
+    const LEVEL_LABELS: Record<string, string> = {
+      BASIC: "Básica Primaria",
+      SECONDARY: "Secundaria",
+      HIGH_SCHOOL: "Bachiller / Media",
+      TECHNICAL: "Técnico Laboral",
+      TECHNOLOGIST: "Tecnólogo",
+      UNDERGRADUATE: "Profesional / Pregrado",
+      SPECIALIZATION: "Especialización",
+      MASTER: "Maestría",
+      DOCTORATE: "Doctorado",
+      OTHER: "Otro",
+    };
+
     if (lvlSelect && opts.academic_levels) {
       opts.academic_levels.forEach((l) => {
         const opt = document.createElement("option");
         opt.value = l;
-        opt.textContent = l;
+        opt.textContent = LEVEL_LABELS[l] || l;
         lvlSelect.appendChild(opt);
       });
     }
@@ -218,6 +287,21 @@ async function loadFilterOptions(container: HTMLElement): Promise<void> {
         opt.textContent = d;
         dptSelect.appendChild(opt);
       });
+    }
+
+    // Extract all professions
+    let allProfs: Array<{ id: string; name: string; category_id?: string }> = [];
+    if (opts.professions && opts.professions.length > 0) {
+      allProfs = opts.professions;
+    } else if (opts.categories) {
+      allProfs = opts.categories.flatMap((c) =>
+        (c.professions || []).map((p) => ({ ...p, category_id: c.id }))
+      );
+    }
+    allProfs.sort((a, b) => a.name.localeCompare(b.name, "es"));
+
+    if (onProfessionsLoaded) {
+      onProfessionsLoaded(allProfs);
     }
   } catch (err) {
     console.warn("Could not load filter options:", err);
@@ -237,6 +321,7 @@ async function executeSearch(container: HTMLElement, page: number, pageSize: num
 
   const query = (container.querySelector("#search-query") as HTMLInputElement)?.value.trim();
   const categoryId = (container.querySelector("#facet-category") as HTMLSelectElement)?.value;
+  const professionId = (container.querySelector("#facet-profession") as HTMLSelectElement)?.value;
   const academicLevel = (container.querySelector("#facet-level") as HTMLSelectElement)?.value;
   const department = (container.querySelector("#facet-department") as HTMLSelectElement)?.value;
   const minExpStr = (container.querySelector("#facet-min-exp") as HTMLInputElement)?.value;
@@ -247,6 +332,7 @@ async function executeSearch(container: HTMLElement, page: number, pageSize: num
     const res = await searchService.searchCandidates({
       q: query || undefined,
       category_id: categoryId || undefined,
+      profession_id: professionId || undefined,
       academic_level: academicLevel || undefined,
       department: department || undefined,
       min_experience_years: minExp,
@@ -270,15 +356,24 @@ async function executeSearch(container: HTMLElement, page: number, pageSize: num
       return;
     }
 
-    grid.innerHTML = res.items.map((c: CandidateItem) => `
+    grid.innerHTML = res.items.map((c: CandidateItem) => {
+      const docCount = c.document_count ?? c.documents_count ?? 1;
+      const profName = c.profession_name || c.primary_profession || "Profesión no especificada";
+      const catName = c.category_name || c.primary_category || "";
+      const acadLevel = c.highest_academic_level || c.top_education || "No registrado";
+      const expYears = c.total_experience_years !== null && c.total_experience_years !== undefined
+        ? `${c.total_experience_years} años`
+        : "Sin datos";
+
+      return `
       <div class="card card-interactive" style="padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); transition: all var(--transition-fast);">
         <div>
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
             <div style="font-weight: 700; color: var(--text-primary); font-size: 1rem; line-height: 1.3;">
               ${c.full_name}
             </div>
-            <span class="badge" style="background: rgba(2, 132, 199, 0.15); color: #38BDF8; font-size: 0.7rem;">
-              ${c.document_count} doc(s)
+            <span class="badge" style="background: rgba(2, 132, 199, 0.15); color: #38BDF8; font-size: 0.7rem; font-weight: 600;">
+              ${docCount} doc(s)
             </span>
           </div>
 
@@ -287,15 +382,15 @@ async function executeSearch(container: HTMLElement, page: number, pageSize: num
           </div>
 
           <div style="margin-bottom: 0.75rem;">
-            <div style="font-size: 0.85rem; font-weight: 600; color: #38BDF8; margin-bottom: 0.2rem;">
-              ${c.profession_name || "Profesión no especificada"}
+            <div style="font-size: 0.875rem; font-weight: 600; color: #38BDF8; margin-bottom: 0.2rem;">
+              ${profName}
             </div>
-            ${c.category_name ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${c.category_name}</div>` : ""}
+            ${catName ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${catName}</div>` : ""}
           </div>
 
           <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1rem;">
-            <div><strong>Nivel Académico:</strong> ${c.highest_academic_level || "No registrado"}</div>
-            <div><strong>Experiencia Total:</strong> ${c.total_experience_years !== null ? `${c.total_experience_years} años` : "Sin datos"}</div>
+            <div><strong>Nivel Académico:</strong> ${acadLevel}</div>
+            <div><strong>Experiencia Total:</strong> ${expYears}</div>
             ${c.department ? `<div><strong>Ubicación:</strong> ${c.municipality ? `${c.municipality}, ` : ""}${c.department}</div>` : ""}
           </div>
         </div>
@@ -304,7 +399,8 @@ async function executeSearch(container: HTMLElement, page: number, pageSize: num
           Ver Dossier Completo
         </button>
       </div>
-    `).join("");
+    `;
+    }).join("");
 
     // Wire Dossier Buttons
     grid.querySelectorAll(".btn-open-dossier").forEach((btn) => {

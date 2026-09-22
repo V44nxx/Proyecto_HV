@@ -67,6 +67,7 @@ class PersonRepository:
                 "sex", "nationality", "birth_date", "birth_country",
                 "birth_department", "birth_municipality", "military_card_number",
                 "military_card_district", "military_card_class",
+                "primary_profession_id", "primary_category_id",
             ]:
                 new_val = getattr(person, attr)
                 if new_val is not None:
@@ -109,22 +110,62 @@ class PersonRepository:
     async def save_educations(
         self, educations: list[Education]
     ) -> list[Education]:
-        """Bulk save education records."""
+        """Bulk save education records, avoiding duplicate degrees for the same person."""
         if not educations:
             return []
-        self._db.add_all(educations)
-        await self._db.flush()
-        return educations
+        person_id = educations[0].person_id
+        stmt = select(Education).where(Education.person_id == person_id)
+        res = await self._db.execute(stmt)
+        existing = res.scalars().all()
+        existing_keys = {
+            (e.degree_title or e.program or "").strip().lower()
+            for e in existing
+            if (e.degree_title or e.program)
+        }
+        to_add = []
+        for edu in educations:
+            key = (edu.degree_title or edu.program or "").strip().lower()
+            if key and key in existing_keys:
+                continue
+            to_add.append(edu)
+            if key:
+                existing_keys.add(key)
+        if to_add:
+            self._db.add_all(to_add)
+            await self._db.flush()
+        return to_add
 
     async def save_work_experiences(
         self, experiences: list[WorkExperience]
     ) -> list[WorkExperience]:
-        """Bulk save work experience records."""
+        """Bulk save work experience records, avoiding duplicates for the same person."""
         if not experiences:
             return []
-        self._db.add_all(experiences)
-        await self._db.flush()
-        return experiences
+        person_id = experiences[0].person_id
+        stmt = select(WorkExperience).where(WorkExperience.person_id == person_id)
+        res = await self._db.execute(stmt)
+        existing = res.scalars().all()
+        existing_keys = {
+            (
+                (w.company_name or "").strip().lower()[:25],
+                (w.position or "").strip().lower()[:25],
+            )
+            for w in existing
+        }
+        to_add = []
+        for exp in experiences:
+            key = (
+                (exp.company_name or "").strip().lower()[:25],
+                (exp.position or "").strip().lower()[:25],
+            )
+            if key in existing_keys:
+                continue
+            to_add.append(exp)
+            existing_keys.add(key)
+        if to_add:
+            self._db.add_all(to_add)
+            await self._db.flush()
+        return to_add
 
     async def save_experience_summary(
         self, summary: ExperienceSummary
@@ -152,12 +193,26 @@ class PersonRepository:
     async def save_languages(
         self, languages: list[Language]
     ) -> list[Language]:
-        """Bulk save language records."""
+        """Bulk save language records, avoiding duplicate languages for the same person."""
         if not languages:
             return []
-        self._db.add_all(languages)
-        await self._db.flush()
-        return languages
+        person_id = languages[0].person_id
+        stmt = select(Language).where(Language.person_id == person_id)
+        res = await self._db.execute(stmt)
+        existing = res.scalars().all()
+        existing_keys = {(l.language_name or "").strip().lower() for l in existing}
+        to_add = []
+        for lang in languages:
+            key = (lang.language_name or "").strip().lower()
+            if key and key in existing_keys:
+                continue
+            to_add.append(lang)
+            if key:
+                existing_keys.add(key)
+        if to_add:
+            self._db.add_all(to_add)
+            await self._db.flush()
+        return to_add
 
     async def save_professional_profile(
         self, profile: ProfessionalProfile
@@ -202,6 +257,9 @@ class PersonRepository:
                 selectinload(Person.work_experiences),
                 selectinload(Person.experience_summary),
                 selectinload(Person.languages),
+                selectinload(Person.primary_profession),
+                selectinload(Person.primary_category),
+                selectinload(Person.professional_profile),
             )
         )
         result = await self._db.execute(stmt)

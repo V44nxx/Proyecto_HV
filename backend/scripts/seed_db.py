@@ -110,15 +110,8 @@ async def seed_initial_admin(db: AsyncSession, roles: dict[str, Role]) -> None:
     Create the initial admin user.
     Reads credentials from environment variables ADMIN_EMAIL and ADMIN_PASSWORD.
     """
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@proyecto-hv.local")
-    admin_password = os.environ.get("ADMIN_PASSWORD")
-
-    if not admin_password:
-        logger.warning(
-            "admin_password_not_set",
-            message="Set ADMIN_PASSWORD env var to create initial admin user",
-        )
-        return
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@proyectohv.com")
+    admin_password = os.getenv("ADMIN_PASSWORD", "Admin_Dev_2024!")
 
     result = await db.execute(select(User).where(User.email == admin_email))
     if result.scalar_one_or_none():
@@ -149,6 +142,12 @@ async def seed_initial_admin(db: AsyncSession, roles: dict[str, Role]) -> None:
 async def main() -> None:
     configure_logging("INFO")
     logger.info("seed_start")
+
+    from app.infrastructure.database.base import Base
+    from app.infrastructure.database.session import engine
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSessionFactory() as db:
         try:

@@ -12,6 +12,7 @@ Endpoints:
 
 import math
 import uuid
+from datetime import date
 from typing import Annotated
 
 import structlog
@@ -43,6 +44,7 @@ from app.application.use_cases.documents.get_document import GetDocumentUseCase
 from app.application.use_cases.documents.list_documents import ListDocumentsUseCase
 from app.application.use_cases.documents.process_document_text import ProcessDocumentTextUseCase
 from app.application.use_cases.documents.upload_document import UploadDocumentUseCase
+from app.config.constants import DocumentType
 from app.presentation.dependencies.auth import (
     CurrentUser,
     require_permission,
@@ -73,7 +75,6 @@ from app.presentation.schemas.document_schemas import (
 )
 
 logger = structlog.get_logger(__name__)
-
 router = APIRouter(prefix="/documents", tags=["Documentos"])
 
 
@@ -88,6 +89,7 @@ async def upload_document(
     request: Request,
     current_user: CurrentUser,
     document_repo: DocumentRepo,
+    person_repo: PersonRepo,
     user_repo: UserRepo,
     storage: Storage,
     file: UploadFile = File(..., description="Archivo PDF de la hoja de vida"),
@@ -95,6 +97,7 @@ async def upload_document(
     """
     Sube un archivo PDF de hoja de vida, verifica su integridad, calcula su checksum SHA-256,
     detecta duplicados y crea el trabajo inicial de procesamiento asíncrono.
+    Ejecuta la clasificación y extracción automática inicial de datos.
     """
     file_bytes = await file.read()
     filename = file.filename or "documento.pdf"
@@ -139,11 +142,43 @@ async def upload_document(
             },
         ) from exc
 
+    # Auto-clasificación y auto-extracción inmediata
+    try:
+        classify_use_case = ClassifyDocumentUseCase(
+            document_repo=document_repo,
+            storage_provider=storage,
+        )
+        cls_res = await classify_use_case.execute(document.id)
+        doc_type = cls_res.document_type.value if hasattr(cls_res.document_type, "value") else str(cls_res.document_type)
+
+        if doc_type == DocumentType.ATS.value:
+            ats_use = ExtractAtsResumeUseCase(
+                document_repo=document_repo,
+                person_repo=person_repo,
+                storage_provider=storage,
+            )
+            await ats_use.execute(document.id)
+        else:
+            fu_use = ExtractFormatoUnicoUseCase(
+                document_repo=document_repo,
+                person_repo=person_repo,
+                storage_provider=storage,
+            )
+            await fu_use.execute(document.id)
+
+        document = await document_repo.get_by_id(document.id) or document
+        latest_job = await document_repo.get_latest_job_for_document(document.id)
+        if latest_job:
+            job = latest_job
+    except Exception as exc:
+        logger.warning("auto_extraction_on_upload_deferred", error=str(exc))
+
     return DocumentUploadResponse(
-        message="Documento subido exitosamente para procesamiento",
+        message="Documento subido y procesado exitosamente",
         document=DocumentResponse.model_validate(document),
         job=ProcessingJobResponse.model_validate(job),
     )
+
 
 
 @router.get(
@@ -212,6 +247,11 @@ async def get_document(
 @router.get(
     "/{document_id}/file",
     summary="Descargar o visualizar archivo PDF original",
+    dependencies=[require_permission("documents", "read")],
+)
+@router.get(
+    "/{document_id}/download",
+    summary="Descargar o visualizar archivo PDF original (alias)",
     dependencies=[require_permission("documents", "read")],
 )
 async def download_document(
@@ -616,7 +656,18 @@ async def get_canonical_resume_endpoint(
     person = await get_use_case.execute(document_id)
 
     if not person:
-        # If extraction hasn't been run yet, trigger it based on document_type
+        # If extraction hasn't been run yet, ensure document is classified
+        if not doc.document_type or doc.document_type == DocumentType.UNKNOWN.value:
+            classify_use_case = ClassifyDocumentUseCase(
+                document_repo=document_repo,
+                storage_provider=storage,
+            )
+            try:
+                cls_res = await classify_use_case.execute(document_id)
+                doc = await document_repo.get_by_id(document_id) or doc
+            except Exception as exc:
+                logger.warning("auto_classification_in_canonical_failed", error=str(exc))
+
         if doc.document_type == DocumentType.ATS.value:
             ats_use_case = ExtractAtsResumeUseCase(
                 document_repo=document_repo,
@@ -657,6 +708,18 @@ async def get_canonical_resume_endpoint(
         "email": person.contact_information.email if person.contact_information else None,
     }
 
+    # Determine professional card if any
+    prof_card = person.military_card_number
+    if not prof_card and person.educations:
+        for edu in person.educations:
+            if edu.professional_card_no:
+                prof_card = edu.professional_card_no
+                break
+
+    prof_name = person.primary_profession.name if person.primary_profession else None
+    cat_name = person.primary_category.name if person.primary_category else None
+    headline = person.professional_profile.summary if person.professional_profile else None
+
     person_dict = {
         "identification_type": person.identification_type,
         "identification_number": person.identification_number,
@@ -674,6 +737,10 @@ async def get_canonical_resume_endpoint(
         "military_card_number": person.military_card_number,
         "military_card_district": person.military_card_district,
         "military_card_class": person.military_card_class,
+        "professional_card_number": prof_card,
+        "headline": headline,
+        "profession": prof_name,
+        "category": cat_name,
     }
 
     educations_list = [
@@ -696,26 +763,40 @@ async def get_canonical_resume_endpoint(
         for e in (person.educations or [])
     ]
 
-    experiences_list = [
-        CanonicalWorkExperienceResponse(
-            company_name=w.company_name,
-            sector=w.sector,
-            position=w.position,
-            department_unit=w.department_unit,
-            country=w.country,
-            department=w.department,
-            municipality=w.municipality,
-            address=w.address,
-            telephone=w.telephone,
-            entity_email=w.entity_email,
-            start_date=w.start_date.isoformat() if w.start_date else None,
-            end_date=w.end_date.isoformat() if w.end_date else None,
-            is_current=w.is_current,
-            responsibilities=w.responsibilities,
-            source_page=w.source_page,
+    experiences_list = []
+    for w in (person.work_experiences or []):
+        tot_m = 0
+        if w.start_date:
+            end_d = date.today() if w.is_current else (w.end_date or date.today())
+            if end_d >= w.start_date:
+                diff_years = end_d.year - w.start_date.year
+                diff_months = end_d.month - w.start_date.month
+                tot_m = diff_years * 12 + diff_months
+                if tot_m == 0 and end_d.year == w.start_date.year:
+                    tot_m = 12
+                tot_m = max(1, tot_m)
+
+        experiences_list.append(
+            CanonicalWorkExperienceResponse(
+                company_name=w.company_name,
+                sector=w.sector,
+                position=w.position,
+                department_unit=w.department_unit,
+                country=w.country,
+                department=w.department,
+                municipality=w.municipality,
+                address=w.address,
+                telephone=w.telephone,
+                entity_email=w.entity_email,
+                start_date=w.start_date.isoformat() if w.start_date else None,
+                end_date=w.end_date.isoformat() if w.end_date else None,
+                is_current=w.is_current,
+                responsibilities=w.responsibilities,
+                source_page=w.source_page,
+                total_months=tot_m,
+                is_public_sector=(w.sector == "PUBLIC"),
+            )
         )
-        for w in (person.work_experiences or [])
-    ]
 
     summary_resp = None
     if person.experience_summary:

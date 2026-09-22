@@ -26,6 +26,10 @@ class CanonicalPerson:
     military_card_number: str | None = None
     military_card_district: str | None = None
     military_card_class: str | None = None
+    professional_card_number: str | None = None
+    headline: str | None = None
+    profession: str | None = None
+    category: str | None = None
 
     @property
     def full_name(self) -> str:
@@ -82,6 +86,7 @@ class CanonicalWorkExperience:
     is_current: bool = False
     responsibilities: str | None = None
     source_page: int | None = None
+    total_months: int = 0
 
 
 @dataclass
@@ -152,6 +157,10 @@ class CanonicalResume:
                 "military_card_number": self.person.military_card_number,
                 "military_card_district": self.person.military_card_district,
                 "military_card_class": self.person.military_card_class,
+                "professional_card_number": self.person.professional_card_number,
+                "headline": self.person.headline,
+                "profession": self.person.profession,
+                "category": self.person.category,
             },
             "contact": {
                 "address": self.contact.address,
@@ -198,6 +207,8 @@ class CanonicalResume:
                     "is_current": w.is_current,
                     "responsibilities": w.responsibilities,
                     "source_page": w.source_page,
+                    "total_months": w.total_months,
+                    "is_public_sector": w.sector == "PUBLIC",
                 }
                 for w in self.work_experiences
             ],

@@ -13,6 +13,8 @@ from app.application.interfaces.storage_provider import StorageProvider
 from app.application.use_cases.documents.exceptions import DocumentNotFoundError
 from app.config.constants import JobStatus
 from app.domain.entities.canonical_resume import CanonicalResume
+from sqlalchemy import select
+from app.domain.services.profession_classifier import ProfessionClassifier
 from app.infrastructure.database.models.document_models import (
     DocumentExtraction,
     ExtractedField,
@@ -20,6 +22,8 @@ from app.infrastructure.database.models.document_models import (
 from app.infrastructure.database.models.person_models import (
     ContactInformation,
     Person,
+    Profession,
+    ProfessionalCategory,
 )
 from app.infrastructure.database.models.resume_models import (
     Education,
@@ -100,6 +104,61 @@ class ExtractFormatoUnicoUseCase:
             full_text=full_text, page_texts=page_texts
         )
 
+        # Classify candidate profession
+        classification_inputs: list[str | None] = []
+        if canonical_resume.person.headline:
+            classification_inputs.append(canonical_resume.person.headline)
+        if canonical_resume.metadata.get("summary"):
+            classification_inputs.append(canonical_resume.metadata.get("summary"))
+        for edu in canonical_resume.educations:
+            if edu.degree_title:
+                classification_inputs.append(edu.degree_title)
+            if edu.program:
+                classification_inputs.append(edu.program)
+        for exp in canonical_resume.work_experiences:
+            if exp.position:
+                classification_inputs.append(exp.position)
+
+        prof_match = ProfessionClassifier.classify(classification_inputs)
+        primary_prof_id = None
+        primary_cat_id = None
+
+        if prof_match.confidence >= 0.4:
+            canonical_resume.person.profession = prof_match.profession_name
+            canonical_resume.person.category = prof_match.category_name
+
+            # Ensure category and profession exist in DB
+            db_session = self._person_repo._db
+            cat_stmt = select(ProfessionalCategory).where(
+                ProfessionalCategory.name == prof_match.category_name
+            )
+            cat_res = await db_session.execute(cat_stmt)
+            cat_entity = cat_res.scalar_one_or_none()
+            if not cat_entity:
+                cat_entity = ProfessionalCategory(
+                    name=prof_match.category_name,
+                    description=f"Sector de {prof_match.category_name}",
+                )
+                db_session.add(cat_entity)
+                await db_session.flush()
+
+            prof_stmt = select(Profession).where(
+                Profession.name == prof_match.profession_name
+            )
+            prof_res = await db_session.execute(prof_stmt)
+            prof_entity = prof_res.scalar_one_or_none()
+            if not prof_entity:
+                prof_entity = Profession(
+                    category_id=cat_entity.id,
+                    name=prof_match.profession_name,
+                    is_active=True,
+                )
+                db_session.add(prof_entity)
+                await db_session.flush()
+
+            primary_prof_id = prof_entity.id
+            primary_cat_id = cat_entity.id
+
         # 3. Create or update Person record
         person_model = Person(
             identification_type=canonical_resume.person.identification_type,
@@ -117,6 +176,8 @@ class ExtractFormatoUnicoUseCase:
             military_card_number=canonical_resume.person.military_card_number,
             military_card_district=canonical_resume.person.military_card_district,
             military_card_class=canonical_resume.person.military_card_class,
+            primary_profession_id=primary_prof_id,
+            primary_category_id=primary_cat_id,
         )
         saved_person = await self._person_repo.create_or_update_person(person_model)
 

@@ -132,6 +132,10 @@ class CanonicalPersonResponse(BaseModel):
     military_card_number: str | None = None
     military_card_district: str | None = None
     military_card_class: str | None = None
+    professional_card_number: str | None = None
+    headline: str | None = None
+    profession: str | None = None
+    category: str | None = None
 
 
 class CanonicalContactResponse(BaseModel):
@@ -183,6 +187,8 @@ class CanonicalWorkExperienceResponse(BaseModel):
     is_current: bool = False
     responsibilities: str | None = None
     source_page: int | None = None
+    total_months: int = 0
+    is_public_sector: bool = False
 
 
 class CanonicalExperienceSummaryResponse(BaseModel):

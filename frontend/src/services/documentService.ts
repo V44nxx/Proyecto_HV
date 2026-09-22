@@ -46,6 +46,16 @@ export interface CanonicalResumeData {
     sex?: string | null;
     nationality?: string | null;
     birth_date?: string | null;
+    birth_place?: string | null;
+    birth_municipality?: string | null;
+    birth_department?: string | null;
+    birth_country?: string | null;
+    military_card_number?: string | null;
+    professional_card_number?: string | null;
+    headline?: string | null;
+    profession?: string | null;
+    category?: string | null;
+    full_name?: string | null;
   };
   contact: {
     address?: string | null;
